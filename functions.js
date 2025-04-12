@@ -120,25 +120,24 @@ function isString(s, lengthLimit=1000000) {
 
 
     const string = String(s);
-    for (let i=0; i<string.length; i++) {
-        if (!isNaN(string[i])) {
-            return false;
-        }
+    // for (let i=0; i<string.length; i++) {
+    //     if (!isNaN(string[i])) {
+    //         return false;
+    //     }
 
-
-    }
-
-    if (string.length<lengthLimit) {
+    if ((string != undefined) && (string != null) && (string.length<lengthLimit)) {
         return true
     } else {
-        return false;
+        return false
     }
+    // }
+  
 }
 
 
 function isNumber(number, lengthLimit=100000) {
     
-
+    
     const string = String(number);
     for (let i=0; i<string.length; i++) {
         if (isNaN(string[i])) {
@@ -210,9 +209,16 @@ function setCookie(req, uuid) {
 }
 
 
+function formatString(string) {
+    return string
+        .trim()
+        .split(" ")
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(" ");
+}
 
 
 
 
 
-module.exports = {authenticateUser,isNumber, reportError, sendEmail, isEmail, isPassword, craftRequest,isString, setCookie, generateCode};
+module.exports = {authenticateUser,isNumber, reportError, sendEmail, isEmail, isPassword, craftRequest,isString, setCookie, generateCode, formatString};

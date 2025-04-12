@@ -63,11 +63,11 @@ async function updateEntry(keyName, keyValue, updateAttributes, tableName=proces
 }
 
 
-async function locateEntry(keyName, value, tableName=process.env.DYNAMO_NAME) {
+async function locateEntry(keyName, value, tableName=process.env.DYNAMO_NAME, overridePartition=false) {
     return new Promise(async(resolve) => {
 
 
-        if (keyName.toLowerCase() === process.env.PARTITION_KEY.toLowerCase()) {
+        if ((keyName.toLowerCase() === process.env.PARTITION_KEY.toLowerCase()) && !overridePartition) {
             const response = await documentClient.send(new GetCommand({
                 TableName: tableName,
                 Key: {
@@ -76,19 +76,46 @@ async function locateEntry(keyName, value, tableName=process.env.DYNAMO_NAME) {
             }))
             // console.log(response);
 
-            resolve(response.Item || "")
+            resolve(response.Item || null)
         } else {
+            // console.log("this is occuring", !overridePartition ? keyName+"-index" : keyName)
+            let response;
+            if (overridePartition) {
+                console.log('we just got here', tableName);
+                console.log("keyName: ", keyName);
+                console.log("value: ", value.trim());
 
-            const response = await documentClient.send(new QueryCommand({
-                TableName: tableName,
-                IndexName: keyName+"-index",
-                KeyConditionExpression: `${keyName} = :value`,
-                ExpressionAttributeValues: {
-                    ":value": value.trim()
-                }
-            }));
+                response = await documentClient.send(new QueryCommand({
+                    TableName: tableName,
 
-            resolve(response.Items || "")
+                    KeyConditionExpression: `#pk = :value`,
+                    ExpressionAttributeNames: {
+                        "#pk": keyName 
+                    },
+                    ExpressionAttributeValues: {
+                        ":value": value.trim()
+                    }
+                }));
+                
+                resolve(response.Items || null)
+                
+            } else {
+                response = await documentClient.send(new QueryCommand({
+                    TableName: tableName,
+                    IndexName: !overridePartition ? keyName+"-index" : keyName,
+                    KeyConditionExpression: `${keyName} = :value`,
+                    ExpressionAttributeValues: {
+                        ":value": value.trim()
+                    }
+                }));
+                
+                resolve(response.Items || null)
+            }
+            
+
+           
+
+     
         }
         
         

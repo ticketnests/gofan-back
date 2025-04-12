@@ -1,7 +1,7 @@
 require('dotenv').config()
 // npm i express https cors fs body-parser express-session uuid memorystore @aws-sdk/lib-dynamodb @aws-sdk/client-dynamodb md5 cryptr
-
-const {authenticateUser, isEmail, isPassword, isString, isNumber, craftRequest, setCookie, sendEmail, generateCode} = require('./functions.js');
+const stripe = require("stripe")(process.env.NODE_ENV==="DEV" ? process.env.STRIPE_TEST : process.env.STRIPE_SECRET)
+const {authenticateUser, isEmail, isPassword, isString, isNumber, craftRequest, setCookie, sendEmail, generateCode, formatString, reportError} = require('./functions.js');
 const express = require("express");
 const https = require("https");
 const cors = require("cors")
@@ -19,7 +19,13 @@ const MemoryStore = require('memorystore')(session)
 const bcrypt = require("bcrypt");
 
 const Cryptr = require('cryptr');
+// const { report } = require('process');
+// const { start } = require('repl');
+
+const QRCode = require("qrcode");
 const { report } = require('process');
+const { start } = require('repl');
+const { join } = require('path');
 
 const saltRounds = 10;
 
@@ -86,6 +92,175 @@ app.use(session({
         checkPeriod: 86400000 
     }), 
 }));
+
+
+
+
+app.post("/webhook", express.raw({type: 'application/json'}), (req,res) => {
+    const sig = req.headers['stripe-signature']
+
+    console.log("THIS WEBHOOK WAS CALLED")
+    let event;
+    
+    const endpointSecret = process.env.STRIPE_WEBHOOK;
+
+    try {
+        event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+
+
+        switch (event.type) {
+            case 'payment_intent.succeeded':
+             const paymentIntentSucceeded = event.data.object
+              console.log("Checkout Completed: ", paymentIntentSucceeded);
+              console.log("Checkout Completed: ", paymentIntentSucceeded['metadata']);
+              console.log("metadata", paymentIntentSucceeded.metaData)
+              if (paymentIntentSucceeded.metadata.uuid) {
+                locateEntry("uuid", paymentIntentSucceeded.metadata.uuid).then((user) => {
+                    if (user) { 
+                    
+
+                        // This will need to be connected 
+                        console.log("this is the full request: ", paymentIntentSucceeded)
+                        // Tickets will be stored in tickets db. 
+                        const metaData = paymentIntentSucceeded.metadata;
+                        console.log("this is all the metaData: ", metaData)
+                        const newTicket = {
+                            ticketId: v4(), 
+                            userId: user.uuid,
+                            isActive: true,
+                            eventId: metaData.eventId,
+                            startDate: cmod.encrypt(metaData.startDate),
+                            endDate: cmod.encrypt(metaData.endDate),
+                            name: cmod.encrypt(metaData.name),
+                            school: cmod.encrypt(metaData.school),
+                            
+                        };
+
+                   
+                            addEntry(newTicket, process.env.DYNAMO_THIRD).then(() => {
+                                console.log("we added the ticket")
+                                res.status(200).send(craftRequest(200));
+                                
+                                return;
+                            })
+                    
+
+
+                     
+                       
+                        // prevTickets.push({
+                        //     isActive: true,
+                        //     // bookmark77
+                        //     eventId: metaData.eventId,
+                        //     startDate: metaData.startDate,
+                        //     endDate: metaData.endDate,
+                        //     schoolId: metaData.schoolId,
+                        //     name: metaData.name,
+                            
+
+                        // })
+
+
+
+                        // console.log("Heres the thing",prevTickets)
+
+
+
+
+
+                    } else {
+                        reportError("A user paid but didn't have any uuid?")
+                        res.status(400).send(craftRequest(400));
+                    }
+                })
+              } else {
+                reportError("A user didn't have any uuid but did end up paying " + paymentIntentSucceeded.metaData.uuid)
+                console.log("This user didn't have any metadata")
+                res.status(400).send(craftRequest(400));
+                
+              }
+              
+              // Then define and call a function to handle the event checkout.session.completed
+              break;
+            // ... handle other event types
+            default:
+              console.log(`Unhandled event type ${event.type}`);
+              res.status(400).send(craftRequest(400));
+          }
+
+    } catch(e) {
+
+        console.log(e)
+        reportError(e)
+        res.status(400).send(craftRequest(400));
+    }
+})
+
+
+
+app.get("/getTickets", (req,res) => {
+
+    try {   
+
+
+        authenticateUser(req).then((id) => {
+            if (id === "No user found") {   
+                res.status(403).send(craftRequest(403));
+            } else {
+                
+
+                if (id) {
+
+                    locateEntry("userId", id, process.env.DYNAMO_THIRD,false).then((tickets) => {
+                        if (tickets) {
+
+
+                            const decryptedTickets = [];
+                            console.log('we got tickets here', tickets)
+                            tickets.forEach((ticket) => {
+                                decryptedTickets.push({
+                                    ticketId: ticket.ticketId,
+                                    endDate: cmod.decrypt(ticket.endDate),
+                                    eventId: ticket.eventId,
+                                    isActive: ticket.isActive,
+                                    name: cmod.decrypt(ticket.name),
+                                    school: cmod.decrypt(ticket.school),
+                                    startDate: cmod.decrypt(ticket.startDate),
+                                })
+                            })
+                            console.log("this is decrypted tickets",decryptedTickets);
+                            // console.log9
+                            res.status(200).send(craftRequest(200, {tickets: decryptedTickets}))
+
+                            
+
+
+
+                        } else {
+                            res.status(200).send(craftRequest(200, {tickets: []}))
+                        }
+                        
+                    })
+
+                } else {
+                    res.status(craftRequest(403));
+                }
+
+                    
+            }
+        })
+
+
+    } catch(e) {
+
+        console.log(e)
+        reportError(e);
+        res.status(400).send(craftRequest(400))
+    }
+
+})
+
+
 
 // Setting up body parser
 app.use(bodyParser.json({limit: "10mb"}))
@@ -225,25 +400,25 @@ app.post("/login", (req,res) => {
 
     try {
 
-        const {email, password} = req.body;
-
-
+        const {email, password, isAdmin} = req.body;
+    
+     
         if (isEmail(email) && isPassword(password)) {
-            locateEntry("emailHash", md5(email)).then((users) => {
+            locateEntry("emailHash", md5(email), isAdmin ? process.env.DYNAMO_SECONDARY : process.env.DYNAMO_NAME).then((users) => {
                 if (users.length>0) {
                     console.log(users[0])
-                    locateEntry("uuid", users[0].uuid).then((user) => {
+                    locateEntry("uuid", users[0].uuid,  isAdmin ? process.env.DYNAMO_SECONDARY : process.env.DYNAMO_NAME).then((user) => {
                         // console.log(thing);
                         if (user != null) {
                             
 
-
+                            console.log("we get here")
                             bcrypt.compare(password, user.password, (err,result) => {
                                 if (err) {
                                     console.log(err);
                                     res.status(400).send(craftRequest(400));
                                 } else {
-
+                                    console.log("do passwords match", result)
                                     
                                     if (result) {
                                         setCookie(req, user.uuid);
@@ -282,18 +457,69 @@ app.post("/login", (req,res) => {
 
 app.get("/getUser", (req,res) => {
 
-    authenticateUser(req).then((user) => {
-        if (user === "No user found") {
+    authenticateUser(req).then((id) => {
+        if (id === "No user found") {
             res.status(403).send(craftRequest(403));
         } else {
-            
-            locateEntry("uuid", user).then((user) => {
-                // console.error(users);
+            locateEntry("uuid", id).then((user) => {
 
-                if (user) {
-                    res.status(200).send(craftRequest(200,user))
+                if (user !== null) {
+
+                    const openUser = {
+                        isAdmin: false,
+                        uuid: user.uuid,
+                        email: cmod.decrypt(user.email),
+                        name: cmod.decrypt(user.name)
+                    }
+
+
+                    res.status(200).send(craftRequest(200,openUser))
                 } else {
-                    res.status(400).send(craftRequest(400));
+
+                    // This would be for admin Accounts
+                    console.log("heres the thing")
+                    locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then((user) => {
+                        if (user !== null) {
+
+
+                            const eventList = []
+                            if (user.events) {
+                                user.events.map((event) => {
+                                    // console.log("start date value",cmod.decrypt(event.startDate))
+                                    const startDate = Number(cmod.decrypt(event.startDate))
+                                    const date = new Date(startDate).toLocaleDateString("en-US", {
+                                        year: "2-digit",
+                                        month: "numeric",
+                                        day: "numeric",
+                                      })
+                                eventList.push({
+                                    id: event.id,
+                                    date: date,
+                                    type: cmod.decrypt(event.type),
+                                    startDate: startDate,
+                                    endDate: cmod.decrypt(event.endDate),
+                                    name: cmod.decrypt(event.name),
+                                })
+                            }   )
+                            }
+                            
+
+                            const currentUser = {
+                                isAdmin: true,
+                                events: eventList,
+                                uuid: user.uuid,
+                                email: cmod.decrypt(user.email),
+                                name: cmod.decrypt(user.name),
+                                schoolAddress: cmod.decrypt(user.schoolAddress),
+                            }
+                            res.status(200).send(craftRequest(200, currentUser))
+                        } else {
+                            res.status(400).send(craftRequest(400));
+                        }
+                    })
+
+
+                   
                 }
                 // if (users.length>0) {
                 //     const user = users[0];
@@ -551,26 +777,6 @@ app.post("/changePassword", (req,res) => {
 
 
 
-
-app.post("/schoolLogin", (req,res) => {
-    try {
-
-
-
-
-        
-
-
-    } catch(e) {
-
-
-
-    }
-})
-
-
-
-
 app.post("/createSchool", (req,res) => {
     // name: "Walter Johnson High School",
     // address: '6400 Rock Spring Dr, Bethesda, MD 20814',
@@ -613,6 +819,7 @@ app.post("/createSchool", (req,res) => {
                                 
         
                                 addEntry(newSchool, process.env.DYNAMO_SECONDARY).then((x) => {
+                                    setCookie(req, uuid);
                                     res.status(200).send(craftRequest(200));
         
                                 })
@@ -654,9 +861,743 @@ app.post("/createSchool", (req,res) => {
 })
 
 
+app.post("/getSchool", (req,res) => {
+
+    try {
+
+        // This UUID represents the id of a school, not of a user
+        const {uuid} = req.body;
 
 
 
+        if (isString(uuid, 100) && (uuid != undefined)) {
+
+            locateEntry("uuid", uuid, process.env.DYNAMO_SECONDARY).then((school) => {
+                console.log("school", typeof school);
+                if (school !== null && school != undefined) {
+
+
+                    console.log(school);
+                    const schoolDetails = {
+                        id: school.uuid,
+                        name: cmod.decrypt(school.name),
+                        address: cmod.decrypt(school.schoolAddress),
+                    }
+
+                    const schoolList = []
+                    
+
+                    if (school.events !== undefined) {
+                            school.events.map((event) => {
+                            if (event.isActive) {
+                                const startDate = Number(cmod.decrypt(event.startDate))
+                                const date = new Date(startDate).toLocaleDateString("en-US", {
+                                    year: "2-digit",
+                                    month: "numeric",
+                                    day: "numeric",
+                                  })
+                            schoolList.push({
+                                id: event.id,
+                                date: date,
+                                type: cmod.decrypt(event.type),
+                                startDate: startDate,
+                                endDate: cmod.decrypt(event.endDate),
+                                name: cmod.decrypt(event.name),
+                            })
+                            }
+                            // console.log("start date value",cmod.decrypt(event.startDate))
+                           
+                    })
+                    }
+                
+                    console.log({...schoolDetails, events: schoolList})
+                    res.status(200).send(craftRequest(200, {...schoolDetails, events: schoolList}))
+
+
+                } else {
+                    res.status(404).send(craftRequest(404));
+                }
+            })
+
+
+        } else {
+            console.log("sf")
+            res.status(400).send(craftRequest(400));
+        }
+
+
+
+
+
+        
+    } catch(e) {
+
+
+        console.log(e)
+        res.status(400).send(craftRequest(400));
+    }
+
+
+})
+
+
+
+app.post("/createEvent", (req,res) => {
+//     options: [{
+//         name: "Adult Pass",
+//         price: 10.99,
+//         amountOfTickets: 0,
+// // Specify ticket prices and options
+//     }, {
+//         name: "Child Pass",
+//         price: 4.99,
+//         amountOfTickets: 0,
+//     }]
+// {
+        //     date: "3/9/25",
+        //     type: "Ticket",
+        //     startDate: Date.now() +1000000,
+        //     endDate: Date.now()+10000000000,
+        //     name: "Into the Woods",
+        //     people: 4,
+        // }
+
+
+    try {
+
+
+
+        authenticateUser(req).then((id) => {
+            if ((id === "No user found") || (id === null)) {
+                res.status(403).send(craftRequest(403));
+            } else {
+
+                const {date, type, startDate, endDate, name, options, description, isActive} = req.body;
+                console.log("isString(date, 10):", isString(date, 10));
+                console.log("isNumber(startDate):", isNumber(startDate));
+                console.log("isNumber(endDate):", isNumber(endDate));
+                console.log("isString(name):", isString(name));
+                console.log("isString(type, 100):", isString(type, 100));
+                // console.log("isEmail(email):", isEmail(email));
+                console.log("options.length !== 0:", options.length !== 0);
+
+                if (isString(date,10) && description && description.length>0 && ((isActive===true)||(isActive===false)) && description.length<1000 && isNumber(startDate) && isNumber(endDate) && isString(name) && isString(type,100) && options.length !== 0) {
+
+
+                    locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then(async(user) => {
+                        if (user != null) {
+                            // Lets check if an option is valid
+                            // {
+                                //         name: "Adult Pass",
+                                //         price: 10.99,
+                                //         amountOfTickets: 0,
+                                // // Specify ticket prices and options
+                                //     }, {
+                                //         name: "Child Pass",
+                                //         price: 4.99,
+                                //         amountOfTickets: 0,
+                                //     }
+                            
+                            const x = (option,y) => {
+                                return Object.keys(option).includes(y)
+                            }
+                            const funct = async () => {
+                                const encryptedOptions = await Promise.all(
+                                    options.map(async (option) => {
+                                        if (x(option, "name") && x(option, "price")) {
+                                            if (option.name.length > 0 && !isNaN(option.price)) {
+                                                // Passed all tests
+                                                const product = await stripe.products.create({
+                                                    name: option.name,
+                                                    active: true,
+                                                    default_price_data: {
+                                                        currency: 'usd',
+                                                        unit_amount: option.price * 100
+                                                    }
+                                                });
+                            
+                                                console.log("option", option);
+                                                console.log(product);
+                            
+                                                return {
+                                                    name: cmod.encrypt(option.name.toLowerCase()),
+                                                    price: cmod.encrypt(option.price),
+                                                    priceId: product.default_price
+                                                };
+                                            } else {
+                                                console.log("Invalid price or name length");
+                                                throw new Error("Invalid price or name length");
+                                            }
+                                        } else {
+                                            console.log("Invalid option structure");
+                                            throw new Error("Invalid option structure");
+                                        }
+                                    })
+                                );
+                            
+                                return encryptedOptions;
+                            };
+                       
+                    
+
+
+                            funct().then((encryptedOptions) => {
+                                const id = v4();
+
+                                const newEvent = {
+                                    id: id,
+                                    type: cmod.encrypt(type),
+                                    startDate: cmod.encrypt(startDate),
+                                    endDate: cmod.encrypt(endDate),
+                                    name: cmod.encrypt(name),
+                                    description: cmod.encrypt(description),
+                                    options: encryptedOptions,
+                                    isActive: isActive,
+                                    ticketsSold: 0,
+                                    CPT: 0,
+
+
+                                }
+                            
+                                console.log("this is the new event", newEvent);
+                           
+                                const prevEvents = user.events != undefined ? user.events.slice() : [];
+                                prevEvents.push(newEvent);
+                                console.log(prevEvents)
+
+
+                                // Need to create stripe stuff
+
+
+                                updateEntry("uuid", user.uuid, {events: prevEvents}, process.env.DYNAMO_SECONDARY).then(() => {
+                                    res.status(200).send(craftRequest(200));
+                                })
+
+                            })
+                        } else {
+                            res.status(400).send(craftRequest(400));
+                        }
+                    })
+
+                    
+
+
+
+                } else {
+                    res.status(400).send(craftRequest(400));
+                }
+        
+                
+        
+                
+
+
+
+            }
+        })
+     
+
+
+    } catch(e) {
+        console.log(e);
+
+
+        res.status(400).send(craftRequest(400));
+    }
+
+
+})
+
+
+
+
+app.post("/create-checkout-session", (req,res) => {
+
+    try {
+
+
+
+        authenticateUser(req).then(async(id) => {
+            if (id === "No user found") {
+                res.status(403).send(craftRequest(403));
+            } else {
+                const {items, eventId, startDate, endDate, name, school} = req.body;
+                // bookmark
+        
+                if (items!=undefined&&items!=null&& items.length>0&&eventId!=undefined&&eventId!=null&&eventId.length>0&&isNumber(startDate)&&isNumber(endDate)&&isString(name, 100)&&isString(school, 100)) {
+                    // {
+                    //     // Provide the exact Price ID (for example, pr_1234) of the product you want to sell
+                    //     price: '{{PRICE_ID}}',
+                    //     quantity: 1,
+                    //   },
+                    
+                    const lineItems = items.map((item) => {
+                        if (item.amountOfTickets > 0) {
+                            return {
+                                quantity: item.amountOfTickets,
+                                price: item.priceId,
+
+                            }
+                        }
+                        
+                    })
+                    
+                    console.log(lineItems);
+                    // uuid: user.uuid,
+                    // isActive: true,
+                    // eventId: metaData.eventId,
+                    // startDate: cmod.encrypt(metaData.startDate),
+                    // endDate: cmod.encrypt(metaData.endDate),
+                    // name: cmod.encrypt(metaData.name),
+                    // school: cmod.encrypt(metaData.school),
+                    const session = await stripe.checkout.sessions.create({
+                        line_items: lineItems,
+                        mode: "payment",
+                        payment_intent_data: {
+                                metadata: {
+                                    uuid: id,
+                                    eventId: eventId,
+                                    startDate: startDate,
+                                    endDate: endDate,
+                                    name: name,
+                                    school: school,
+                               
+                                    
+                                }
+                        },
+                        success_url: process.env.NODE_ENV==="DEV" ? "http://localhost:5173/dashboard" : "https://tickulo.com/dashboard",
+                        cancel_url: process.env.NODE_ENV==="DEV" ? "http://localhost:5173/" : "https://tickulo.com/dashboard"
+                    })
+                    console.log("Session: ",session);
+                    console.log("Session: ",session.url);
+                    res.status(200).send(craftRequest(200, {url: session.url}))
+        
+        
+                    
+                } else {
+                    res.status(400).send(craftRequest(400));
+                }
+            }
+        })
+       
+        
+
+    } catch(e) {
+
+
+        console.log(e);
+        reportError(e);
+        res.status(400).send(craftRequest(400))
+    }
+
+
+})
+
+
+
+
+
+
+app.post("/getGame", (req,res) => {
+
+
+    try {
+        const {schoolId, gameId} = req.body;
+        if (isString(gameId, 100) && isString(schoolId, 100)) {
+            
+            locateEntry("uuid", schoolId, process.env.DYNAMO_SECONDARY).then((school) => {
+                if (school != null) {
+
+                    let game;
+                    
+                    for (let i=0; i<school.events.length; i++) {
+                        console.log(school.events[i].id === gameId)
+                        if (school.events[i].id === gameId) {
+                            
+                            game = school.events[i];
+                            break;
+                        }
+                    
+                    }
+
+                    if ((game != undefined) && (game != null)) {
+                        const ticket = {
+                            schoolId: school.uuid,
+                            school: formatString(cmod.decrypt(school.name)),
+                            address: formatString(cmod.decrypt(school.schoolAddress)),
+                            event: {
+                                eventId: game.id,
+                                type: cmod.decrypt(game.type),
+                                startDate: Number(cmod.decrypt(game.startDate)),
+                                endDate: Number(cmod.decrypt(game.endDate)),
+                                name: formatString(cmod.decrypt(game.name)),
+                            },
+                            options: game.options.map((option) => {
+                                return {
+                                    name: formatString(cmod.decrypt(option.name)),
+                                    price: cmod.decrypt(option.price),
+                                    amountOfTickets: 0,
+                                    priceId: option.priceId
+                                }
+                            }),
+                   
+                
+                      
+                            
+                        }
+    
+                        console.log(ticket);
+                        res.status(200).send(craftRequest(200, ticket));
+                    } else {
+                        res.status(400).send(craftRequest(400));
+                    }
+
+                    
+
+                    // Decryption aspect
+
+                   
+                //     id: ticketId,
+                //     school: 'Walter Johnson High School',
+                //     address: "6400 Rock Spring Dr Bethesda, MD, 20814",
+                //     event: {
+                //         type: "Ticket",
+                //         startDate: Date.now() +1000000,
+                //         endDate: Date.now()+10000000000,
+                //         name: "Into the Woods",
+                //         people: 4,
+                //     },
+                //     options: [{
+                //         name: "Adult Pass",
+                //         price: 10.99,
+                //         amountOfTickets: 0,
+                // // Specify ticket prices and options
+                //     }, {
+                //         name: "Child Pass",
+                //         price: 4.99,
+                //         amountOfTickets: 0,
+                //     }]
+
+                // const decryptedOptions
+
+
+                   
+
+
+
+
+
+
+
+                    
+
+                } else {
+                    console.log('asd')
+                    res.status(400).send(craftRequest(400));
+                }
+            })
+
+
+
+        } else {
+            
+            res.status(400).send(craftRequest(400));
+        }
+
+
+
+
+
+
+
+    } catch(e) {
+        console.log(e)
+        res.status(400).send(craftRequest(400));
+    }
+
+})
+
+
+
+
+app.post("/generateQRCODE", (req,res) => {
+    try {
+
+        const {ticketId} = req.body;
+        console.log("This is the body", req.body)
+        console.log("This is ticketId", ticketId)
+        
+        authenticateUser(req).then((id) => {
+            if (id === "No user found") {
+                res.status(403).send(craftRequest(403));
+            } else {
+
+                if ((id !== null) && (id !== undefined) && (isString(ticketId, 100))) {
+
+                    
+                    QRCode.toDataURL(ticketId).then((url) => {
+                        console.log(url);
+    
+                        if (url) {
+                            res.status(200).send(craftRequest(200, {img: url}));
+                        } else {
+                            res.status(400).send(craftRequest(400));
+                        }
+    
+    
+                    }).catch((e) => {
+    
+    
+                        console.log(e);
+                        reportError(e);
+                        res.status(400).send(craftRequest(400));
+                    })
+                } else {
+                    res.status(403).send(craftRequest(403));
+                }
+            
+
+
+            }
+        })
+
+
+
+    } catch(e) {
+        console.log(e)
+        reportError(e);
+        res.status(400).send(craftRequest(400));
+    }
+
+ 
+
+})
+
+
+app.post("/scanUser", (req,res) => {
+
+
+    try {
+        const {uuid, eventId} = req.body;
+
+        if (isString(uuid, 100) && isString(eventId, 100)) {
+            authenticateUser(req).then((id) => {
+                if (id === "No user found") {
+                    res.status(403).send(craftRequest(403))
+                } else {
+    
+                    locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then((adminUser) => {
+                        if (adminUser !== null) {
+                            console.log("adminUser.events: ", adminUser.events)
+                            let passedTest = false;
+                            for (let i=0; i<adminUser.events.length; i++) {
+                                if (adminUser.events[i].id === eventId) {
+                                    passedTest = true;
+                                    break;
+                                }
+                                
+                            }
+                        
+                            if (toString(uuid, 100) && passedTest) {
+    
+                                locateEntry("ticketId", uuid, process.env.DYNAMO_THIRD,true).then(async (ticket) => {
+                                    if (ticket !== null) {
+
+                                        if (ticket[0].isActive) {
+                                            locateEntry("uuid", ticket[0].userId).then((user) => {
+                                                if (user !==null) {
+    
+                                                    const body = {
+                                                        uuid: ticket[0].userId,
+                                                        ticket: {
+                                                            ticketId: ticket[0].ticketId,
+                                                            name: cmod.decrypt(ticket[0].name),
+                                                            isActive: ticket[0].isActive,
+                                                            uuid: ticket[0].userId,
+                                                        },
+                                                        name: cmod.decrypt(user.name),
+                                                    }
+
+
+                                                    updateEntry("ticketId", ticket[0].ticketId, {isActive: false}, process.env.DYNAMO_THIRD).then(() => {
+                                                        res.status(200).send(craftRequest(200, body));
+                                                    })
+                                                   
+                                                } else {
+                                                    console.log("this was called #4")
+                                                    res.status(400).send(craftRequest(400));
+                                                }
+                                            })
+                                        } else {
+                                            res.status(403).send(craftRequest(403));
+                                        }
+                                        
+                                       
+                                    } else {
+                                        console.log("this was called #3")
+                                        res.status(400).send(craftRequest(400));
+                                    }
+                                })
+                    
+                    
+                    
+                            } else {
+                                console.log("this was called #2")
+                                res.status(400).send(craftRequest(400));
+                            }
+    
+    
+                            // We could potentially add some feature here which only allows people to search if they go to the same school or same school county
+    
+    
+    
+    
+    
+                        } else {
+                            res.status(403).send(craftRequest(403));
+                        }
+    
+                    })
+    
+    
+                  
+                }
+            })
+          
+        } else {
+            console.log("this was called #1")
+            res.status(400).send(craftRequest(400));
+        }
+        
+
+
+    
+    } catch(e) {
+        console.log(e);
+
+        reportError(e);
+
+        res.status(400).send(craftRequest(400))
+    }
+
+
+
+})
+
+
+
+
+
+app.get("/getDashboardAdmin", (req,res) => {
+    try {
+
+        authenticateUser(req).then((id) => {
+            if (id === "No user found") {
+                res.status(400).send(craftRequest(400));
+            } else {
+
+                locateEntry("uuid", id,process.env.DYNAMO_SECONDARY).then((user) => {
+
+
+                    if ((user !== null) && (user.events)) {
+                        const userEvents = user.events;
+                        
+                        const decryptedEvents = [];
+                        // id: id,
+                        // type: cmod.encrypt(type),
+                        // startDate: cmod.encrypt(startDate),
+                        // endDate: cmod.encrypt(endDate),
+                        // name: cmod.encrypt(name),
+                        // description: cmod.encrypt(description),
+                        // options: encryptedOptions,
+                        // isActive: isActive,
+                        // ticketsSold: 0,
+                        // CPT: 0,
+                        userEvents.forEach((event) => {
+                            decryptedEvents.push({
+                                id: event.id,
+                                type: cmod.decrypt(event.type),
+                                startDate: cmod.decrypt(event.startDate),
+                                name: cmod.decrypt(event.name),
+                                isActive: event.isActive,
+                                ticketsSold: event.ticketsSold,
+                                CPT: event.CPT,
+                            })
+                        })
+
+                        res.status(200).send(craftRequest(200, decryptedEvents))
+
+
+                        
+
+
+
+                        // the thing is occured
+
+
+
+
+
+                    } else {
+                        res.status(403).send(craftRequest(403));
+                    }
+                    
+                })
+
+
+
+            }
+        })
+        
+
+
+    } catch(e) {
+
+
+        console.log(e);
+        reportError(e);
+        res.status(400).send(craftRequest(400));
+    }
+
+
+
+})
+
+app.post("/getEventStats", (req,res) => {
+    try {
+
+        const {eventId} = req.body;
+
+        if (eventId) {
+
+            
+
+
+
+        } else {
+            res.status(400).send(craftRequest(400));
+        }
+
+
+
+
+        
+
+
+
+
+
+
+    } catch(e) {
+
+
+        console.log(e);
+        reportError(e);
+        res.status(400).send(craftRequest(400));
+    }
+
+
+})
 
 
 
