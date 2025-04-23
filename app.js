@@ -1220,8 +1220,8 @@ app.post("/create-checkout-session", (req,res) => {
                                     
                                 }
                         },
-                        success_url: process.env.NODE_ENV==="DEV" ? "http://localhost:5173/dashboard" : "https://tickulo.com/dashboard",
-                        cancel_url: process.env.NODE_ENV==="DEV" ? "http://localhost:5173/" : "https://tickulo.com/dashboard"
+                        success_url: process.env.NODE_ENV==="DEV" ? "http://localhost:5173/dashboard" : "https://ticketnest.us/dashboard",
+                        cancel_url: process.env.NODE_ENV==="DEV" ? "http://localhost:5173/" : "https://ticketnest.us/dashboard"
                     })
                     console.log("Session: ",session);
                     console.log("Session: ",session.url);
