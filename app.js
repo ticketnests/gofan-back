@@ -60,8 +60,8 @@ if (process.env.NODE_ENV === "DEV") {
     // STEP 1: This will be where the certificates are stored.
 
     options = {
-        key: fs.readFileSync('C:\\Program Files\\Git\\usr\\bin\\key.pem'),
-        cert: fs.readFileSync('C:\\Program Files\\Git\\usr\\bin\\certificate.pem'),
+        key: fs.readFileSync('/etc/letsencrypt/live/api.ticketnest.us/privkey.pem'),
+        cert: fs.readFileSync('/etc/letsencrypt/live/api.ticketnest.us/fullchain.pem'),
         // Remove this line once done with production
         rejectUnauthorized: false
     };    
