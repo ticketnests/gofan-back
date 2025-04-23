@@ -1,4 +1,6 @@
 require('dotenv').config()
+const { Parser } = require('json2csv');
+
 // npm i express https cors fs body-parser express-session uuid memorystore @aws-sdk/lib-dynamodb @aws-sdk/client-dynamodb md5 cryptr
 const stripe = require("stripe")(process.env.NODE_ENV==="DEV" ? process.env.STRIPE_TEST : process.env.STRIPE_SECRET)
 const {authenticateUser, isEmail, isPassword, isString, isNumber, craftRequest, setCookie, sendEmail, generateCode, formatString, reportError} = require('./functions.js');
@@ -13,7 +15,7 @@ const bodyParser = require("body-parser")
 const app = express();
 const region = "us-east-1"
 const session = require("express-session");
-const { locateEntry, addEntry, updateEntry } = require('./databaseFunctions.js');
+const { locateEntry, addEntry, updateEntry, searchEntry } = require('./databaseFunctions.js');
 const MemoryStore = require('memorystore')(session)
 
 const bcrypt = require("bcrypt");
@@ -23,9 +25,8 @@ const Cryptr = require('cryptr');
 // const { start } = require('repl');
 
 const QRCode = require("qrcode");
-const { report } = require('process');
-const { start } = require('repl');
-const { join } = require('path');
+
+// const e = require('express');
 
 const saltRounds = 10;
 
@@ -117,33 +118,61 @@ app.post("/webhook", express.raw({type: 'application/json'}), (req,res) => {
               if (paymentIntentSucceeded.metadata.uuid) {
                 locateEntry("uuid", paymentIntentSucceeded.metadata.uuid).then((user) => {
                     if (user) { 
-                    
-
                         // This will need to be connected 
                         console.log("this is the full request: ", paymentIntentSucceeded)
                         // Tickets will be stored in tickets db. 
+                        let totalAmountGenerated = 0;
                         const metaData = paymentIntentSucceeded.metadata;
                         console.log("this is all the metaData: ", metaData)
-                        const newTicket = {
-                            ticketId: v4(), 
-                            userId: user.uuid,
-                            isActive: true,
-                            eventId: metaData.eventId,
-                            startDate: cmod.encrypt(metaData.startDate),
-                            endDate: cmod.encrypt(metaData.endDate),
-                            name: cmod.encrypt(metaData.name),
-                            school: cmod.encrypt(metaData.school),
+                        JSON.parse(metaData.allBought).forEach((item) => {
+                            totalAmountGenerated += item.price;
+                            const newTicket = {
+                                ticketId: v4(), 
+                                type: item.name,
+                                price: item.price, 
+                                userId: user.uuid,
+                                isActive: true,
+                                eventId: metaData.eventId,
+                                startDate: cmod.encrypt(metaData.startDate),
+                                endDate: cmod.encrypt(metaData.endDate),
+                                name: cmod.encrypt(metaData.name),
+                                school: cmod.encrypt(metaData.school),
+                            };
                             
-                        };
-
-                   
                             addEntry(newTicket, process.env.DYNAMO_THIRD).then(() => {
-                                console.log("we added the ticket")
-                                res.status(200).send(craftRequest(200));
-                                
+                                console.log("Added a ticket just now")      
                                 return;
                             })
-                    
+                        })
+                        locateEntry("uuid", metaData.schoolId, process.env.DYNAMO_SECONDARY).then((school) => {
+                            if (school!=null) {
+                                // const prevEvents = school.events;
+                                
+                          
+                                const updatedEvents = school.events?.map((event) => {
+                                    if (event.id === metaData.eventId) {
+                                        return {...event, ticketsSold: Number(event.ticketsSold)+1, totalRevenue: Number(totalAmountGenerated), CPT: totalAmountGenerated/(event.ticketsSold+1)}
+                                    } else {
+                                        return event;
+                                    }
+                                })
+                                console.log("updated events", updatedEvents)
+                                console.log("heres the metaData", metaData)
+                                updateEntry("uuid",metaData.schoolId, {events: updatedEvents}, process.env.DYNAMO_SECONDARY).then(() => {
+                                    console.log("all is well", updatedEvents);
+                                    res.status(200).send(craftRequest(200));
+                                })
+                            }
+                            
+
+
+                        })
+                        
+                        
+                        
+                     
+
+                   
 
 
                      
@@ -218,15 +247,19 @@ app.get("/getTickets", (req,res) => {
                             const decryptedTickets = [];
                             console.log('we got tickets here', tickets)
                             tickets.forEach((ticket) => {
-                                decryptedTickets.push({
-                                    ticketId: ticket.ticketId,
-                                    endDate: cmod.decrypt(ticket.endDate),
-                                    eventId: ticket.eventId,
-                                    isActive: ticket.isActive,
-                                    name: cmod.decrypt(ticket.name),
-                                    school: cmod.decrypt(ticket.school),
-                                    startDate: cmod.decrypt(ticket.startDate),
-                                })
+                                if (ticket.isActive) {
+                                    decryptedTickets.push({
+                                        ticketId: ticket.ticketId,
+                                        endDate: cmod.decrypt(ticket.endDate),
+                                        eventId: ticket.eventId,
+                                        isActive: ticket.isActive,
+                                        name: cmod.decrypt(ticket.name),
+                                        school: cmod.decrypt(ticket.school),
+                                        startDate: cmod.decrypt(ticket.startDate),
+                                        type: ticket.type
+                                    })
+                                }
+                                
                             })
                             console.log("this is decrypted tickets",decryptedTickets);
                             // console.log9
@@ -264,6 +297,7 @@ app.get("/getTickets", (req,res) => {
 
 // Setting up body parser
 app.use(bodyParser.json({limit: "10mb"}))
+app.use(bodyParser.urlencoded({ extended: true }));
 
 
 
@@ -464,7 +498,7 @@ app.get("/getUser", (req,res) => {
             locateEntry("uuid", id).then((user) => {
 
                 if (user !== null) {
-
+                    console.log("currUser", user)
                     const openUser = {
                         isAdmin: false,
                         uuid: user.uuid,
@@ -808,6 +842,7 @@ app.post("/createSchool", (req,res) => {
                                 const uuid = v4()
                                 const newSchool = {
                                     uuid: uuid,
+                                    schoolName: "x",
                                     password: hash,
                                     emailHash: md5(email),
                                     email: cmod.encrypt(email),
@@ -819,10 +854,14 @@ app.post("/createSchool", (req,res) => {
                                 
         
                                 addEntry(newSchool, process.env.DYNAMO_SECONDARY).then((x) => {
-                                    setCookie(req, uuid);
-                                    res.status(200).send(craftRequest(200));
+                                    addEntry({uuid: "SCHOOLNAMES", schoolName: name.toLowerCase(), id: uuid}, process.env.DYNAMO_SECONDARY).then(() => {
+                                        setCookie(req, uuid);
+                                        res.status(200).send(craftRequest(200));
+                                    })
         
                                 })
+
+                                
         
         
                             } else {
@@ -986,7 +1025,7 @@ app.post("/createEvent", (req,res) => {
 
                     locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then(async(user) => {
                         if (user != null) {
-                            // Lets check if an option is valid
+                            // Lets check if an option  is valid
                             // {
                                 //         name: "Adult Pass",
                                 //         price: 10.99,
@@ -1055,6 +1094,7 @@ app.post("/createEvent", (req,res) => {
                                     isActive: isActive,
                                     ticketsSold: 0,
                                     CPT: 0,
+                                    totalRevenue: 0
 
 
                                 }
@@ -1063,7 +1103,7 @@ app.post("/createEvent", (req,res) => {
                            
                                 const prevEvents = user.events != undefined ? user.events.slice() : [];
                                 prevEvents.push(newEvent);
-                                console.log(prevEvents)
+                                console.log(prevEvents) 
 
 
                                 // Need to create stripe stuff
@@ -1121,24 +1161,37 @@ app.post("/create-checkout-session", (req,res) => {
             if (id === "No user found") {
                 res.status(403).send(craftRequest(403));
             } else {
-                const {items, eventId, startDate, endDate, name, school} = req.body;
+                const {items, eventId, startDate, endDate, name, school,schoolId} = req.body;
                 // bookmark
         
-                if (items!=undefined&&items!=null&& items.length>0&&eventId!=undefined&&eventId!=null&&eventId.length>0&&isNumber(startDate)&&isNumber(endDate)&&isString(name, 100)&&isString(school, 100)) {
+                if (items!=undefined&&schoolId!==undefined&&schoolId!==null&&schoolId.length<1000 &&items!=null&& items.length>0&&eventId!=undefined&&eventId!=null&&eventId.length>0&&isNumber(startDate)&&isNumber(endDate)&&isString(name, 100)&&isString(school, 100)) {
                     // {
                     //     // Provide the exact Price ID (for example, pr_1234) of the product you want to sell
                     //     price: '{{PRICE_ID}}',
                     //     quantity: 1,
                     //   },
                     
+
+                    console.log("this is the items: ",items);
                     const lineItems = items.map((item) => {
                         if (item.amountOfTickets > 0) {
                             return {
-                                quantity: item.amountOfTickets,
+                                quantity: item.amountOfTickets==="" ? 0 : item.amountOfTickets,
                                 price: item.priceId,
-
                             }
                         }
+                        
+                    })
+                    const formattedTickets = []
+                    items.forEach((item) => {
+                        formattedTickets.push(
+                            {
+                                name: item.name,
+                                price: Number(item.price)
+                            }
+                        )
+
+                        
                         
                     })
                     
@@ -1161,6 +1214,8 @@ app.post("/create-checkout-session", (req,res) => {
                                     endDate: endDate,
                                     name: name,
                                     school: school,
+                                    schoolId: schoolId,
+                                    allBought: JSON.stringify(formattedTickets)
                                
                                     
                                 }
@@ -1210,7 +1265,7 @@ app.post("/getGame", (req,res) => {
 
                     let game;
                     
-                    for (let i=0; i<school.events.length; i++) {
+                    for (let i=0; i<school.events.length || 0; i++) {
                         console.log(school.events[i].id === gameId)
                         if (school.events[i].id === gameId) {
                             
@@ -1227,6 +1282,7 @@ app.post("/getGame", (req,res) => {
                             address: formatString(cmod.decrypt(school.schoolAddress)),
                             event: {
                                 eventId: game.id,
+                                description: formatString(cmod.decrypt(game.description)),
                                 type: cmod.decrypt(game.type),
                                 startDate: Number(cmod.decrypt(game.startDate)),
                                 endDate: Number(cmod.decrypt(game.endDate)),
@@ -1496,11 +1552,13 @@ app.get("/getDashboardAdmin", (req,res) => {
                 res.status(400).send(craftRequest(400));
             } else {
 
-                locateEntry("uuid", id,process.env.DYNAMO_SECONDARY).then((user) => {
+                locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then((user) => {
 
 
-                    if ((user !== null) && (user.events)) {
-                        const userEvents = user.events;
+                    if ((user !== null)) {
+
+                        
+                        const userEvents = user.events || [];
                         
                         const decryptedEvents = [];
                         // id: id,
@@ -1522,6 +1580,7 @@ app.get("/getDashboardAdmin", (req,res) => {
                                 isActive: event.isActive,
                                 ticketsSold: event.ticketsSold,
                                 CPT: event.CPT,
+                                description: cmod.decrypt(event.description)
                             })
                         })
 
@@ -1539,6 +1598,7 @@ app.get("/getDashboardAdmin", (req,res) => {
 
 
                     } else {
+                        console.log("it failed to locate User")
                         res.status(403).send(craftRequest(403));
                     }
                     
@@ -1567,26 +1627,61 @@ app.post("/getEventStats", (req,res) => {
     try {
 
         const {eventId} = req.body;
-
-        if (eventId) {
-
-            
-
-
-
-        } else {
-            res.status(400).send(craftRequest(400));
-        }
+        authenticateUser(req).then((id) => {
+            if (id === "No user found") {
+                res.status(403).send(craftRequest(403));
+            } else {
 
 
-
-
+                if ((eventId!==null) && (typeof eventId === "string")) {
+                    const allBuyers = {};
         
-
-
-
-
-
+        
+                    // Double check if that is the index that is meant to be used for that
+                    locateEntry("eventId", eventId, process.env.DYNAMO_THIRD).then(async (tickets) => {
+                        console.log("allTickets found", tickets);
+                        if (tickets !== null) {
+                            // Process each ticket sequentially
+                            for (const ticket of tickets) {
+                                if (!allBuyers[ticket.userId]) {
+                                    // Await the user lookup
+                                    const user = await locateEntry('uuid', ticket.userId);
+                                    if (user != null) {
+                                        allBuyers[ticket.userId] = {
+                                            amountSpent: ticket.price || 0, // Initialize with ticket price
+                                            name: cmod.decrypt(user.name),
+                                            email: cmod.decrypt(user.email),
+                                        };
+                                    }
+                                } else {
+                                    // Update the existing amount
+                                    const newPrice = ticket.price || 0;
+                                    allBuyers[ticket.userId].amountSpent += newPrice;
+                                }
+                            }
+                    
+                            console.log("sent final request");
+                            const processedList = [];
+                            Object.keys(allBuyers).forEach((id, i) => {
+                                processedList.push({
+                                    id: id,
+                                    amountPaid: allBuyers[id].amountSpent,
+                                    name: formatString(allBuyers[id].name),
+                                    email: allBuyers[id].email.toLowerCase(),
+                                })
+                            })
+        
+                            res.status(200).send(craftRequest(200, processedList));
+                        } else {
+                            res.status(400).send(craftRequest(400));
+                        }
+                    });
+                } else {
+                    res.status(400).send(craftRequest(400));
+                }
+            }
+        })
+        
 
     } catch(e) {
 
@@ -1601,6 +1696,371 @@ app.post("/getEventStats", (req,res) => {
 
 
 
+
+
+
+
+// We need to add a way to add security personnel to be able to scan tickets, instead of it just being the guy that creates the account.
+// every single school could have a list of subpeople that have accounts. Scanning tickets might not be the best way to do this
+// Another option to completely opt out from qrcodes and instead do the same way that gofan does things. 
+
+
+// Export ID means the stuff that is in 
+
+function exportData(exportId="d168f7ab-d8ee-4e9e-ad40-c5430e227cf4") {
+
+
+    return new Promise(async(resolve) => {
+        
+        try {
+            if (exportId) {
+                locateEntry("eventId", exportId, process.env.DYNAMO_THIRD).then(async (tickets) => {
+                    console.log("allTickets found", tickets);
+                    const allBuyers = {}
+                    if (tickets !== null) {
+                        // Process each ticket sequentially
+                        for (const ticket of tickets) {
+                            if (!allBuyers[ticket.userId]) {
+                                // Await the user lookup
+                                const user = await locateEntry('uuid', ticket.userId);
+                                if (user != null) {
+                                    allBuyers[ticket.userId] = {
+                                        amountSpent: ticket.price || 0, // Initialize with ticket price
+                                        name: cmod.decrypt(user.name),
+                                        email: cmod.decrypt(user.email),
+                                    };
+                                }
+                            } else {
+                                // Update the existing amount
+                                const newPrice = ticket.price || 0;
+                                allBuyers[ticket.userId].amountSpent += newPrice;
+                            }
+                        }
+                
+                        console.log("sent final request");
+                        const processedList = [];
+                        Object.keys(allBuyers).forEach((id, i) => {
+                            processedList.push({
+                                id: id,
+                                amountPaid: allBuyers[id].amountSpent,
+                                name: formatString(allBuyers[id].name),
+                                email: allBuyers[id].email.toLowerCase(),
+                            })
+                        })
+        
+                        const fields = ['id', 'amountPaid', 'name', 'email'];
+                        const opts = { fields }
+                        const parser = new Parser(opts);
+                        const csv = parser.parse(processedList);
+                        resolve(csv)
+
+                      
+        
+        
+        
+        
+        
+        
+        
+        
+                        
+        
+        
+        
+        
+                    } else {
+                        resolve("err");
+                    }
+                });
+            } else {
+                resolve("err")
+            }
+    
+
+        } catch(e) {
+            console.log(e);
+            reportError(e);
+            resolve("err");
+        }
+    
+
+     
+
+    })
+    // Export Id would be for every single event that the person has
+ 
+}
+
+app.post("/exportData", (req,res) => {
+    
+
+    try {
+        authenticateUser(req).then((id) => {
+            if (id === "No user found") {
+                console.log("this is the thing")
+                res.status(403).send(craftRequest(403))
+            } else {
+                const {exportId} = req.body;
+
+                if (exportId&&exportId.length>0&&typeof exportId === "string") {
+
+                    exportData(exportId).then((x) => {
+                        if (x!=="err") {
+                            res.header('Content-Type', 'text/csv');
+                            res.attachment('export.csv');
+                            res.status(200).send(x);
+                        } else {
+                            res.status(400).send(craftRequest(400))
+                        }
+                    })
+
+                } else {
+                    res.status(400).send(craftRequest(400));
+
+                }
+            }
+        })
+
+
+
+
+    } catch(e) {
+        console.log(e);
+        reportError(e);
+        res.status(400).send(craftRequest(400));
+    }
+  
+    
+    
+   
+})
+
+// CHANGE THIS LATER, THIS IS JUST FOR TESTING
+
+
+
+
+app.post("/updateEvent",(req,res) => {
+
+
+    try {
+
+        const {event} = req.body;
+
+
+        if (event!==null&&event!==undefined) {
+            console.log("this occured #1")
+            authenticateUser(req).then((id) => {
+                if (id === "No user found") {
+                    res.status(403).send(craftRequest(403));
+                } else {
+
+                    locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then((school) => {
+                        if (school !== null) {
+
+                            const events = school.events || []
+                            for (let i=0; i<events.length; i++) {
+                                
+                                if (events[i].id === event.id) {
+                                    events[i].name = cmod.encrypt(event.name);
+                                    events[i].description = cmod.encrypt(event.description);
+                                    break;
+                                }
+
+                                
+                            }
+                           
+
+
+                            // for (const curEvent in events) {
+                            //     if (curEvent.id === id) {
+                            //         const updatedEvent = {
+                            //             CPT: curEvent.CPT,
+                            //             type: curEvent.type,
+                            //             totalRevenue: curEvent.totalRevenue || 0,
+                            //             ticketsSold: curEvent.ticketsSold || 0,
+                            //             startDate: curEvent.startDate,
+                            //             description: cmod.encrypt(event.description),
+                            //             endDate: curEvent.endDate,
+                            //             isActive: event.isActive,
+                            //             name: cmod.encrypt(event.name),
+                            //         }
+                            //         newEvents.push(updatedEvent);
+                            //     } else {
+                            //         newEvents.push(curEvent)
+                            //     }
+                            // }
+                            console.log("this is the new events:", events)
+                            updateEntry("uuid", id, {events: events}, process.env.DYNAMO_SECONDARY).then(() => {
+                                res.status(200).send(craftRequest(200));
+                            })
+
+                        
+                        } else {
+                            res.status(403).send(craftRequest(403))
+                        }
+                    })
+
+
+                }
+            })
+
+
+
+        } else {
+            console.log("this occured #2")
+            res.status(400).send(craftRequest(400));
+
+        }
+
+    } catch(e) {
+        console.log("this occured #3")
+        console.log(e);
+        reportError(400);
+        res.status(400).send(craftRequest(400))
+    }
+})
+
+
+app.post("/schoolSearch", (req,res) => {
+    try {
+        const {query} = req.body;
+        if ((typeof query === "string") && (query.length>=2)) {
+            searchEntry("uuid", "SCHOOLNAMES", "schoolName", query.toLowerCase(), process.env.DYNAMO_SECONDARY).then((entries) => {
+                if ((entries!==null) && (Array.isArray(entries))) {
+                    res.status(200).send(craftRequest(200, entries))
+                } else {
+                    console.log('adf')
+                    res.status(400).send(craftRequest(400));
+                }
+            })
+        } else {
+            res.status(400).send(craftRequest(400))
+        }
+    } catch(e) {
+        console.log(e);
+        reportError(e);
+        res.status(400).send(craftRequest(400))
+    }
+})
+
+
+app.get("/getFinancials", (req,res) => {
+    authenticateUser(req).then((id) => {
+        if (id === "No user found") {
+            res.status(404).send(craftRequest(404))
+        } else {
+            locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then((school) => {
+                if (school!=null) {
+                    const body = {
+                        totalRevenue: 0,
+                        ticketsSold: 0,
+                    }
+                    if (school.events!==null) {
+                        console.log("SCHOOL EVENTS", school.events)
+                        for (const i in school.events) {
+                            const event = school.events[i]
+                            // console.log("current event", event)
+                            if (event.totalRevenue&&event.ticketsSold) {
+                                
+                                body.totalRevenue += Number(event.totalRevenue);
+                                body.ticketsSold += Number(event.ticketsSold);
+                            }
+                            console.log(body)
+                        }
+    
+                    }
+                    console.log("FINAL BODY", body)
+                    res.status(200).send(craftRequest(200, body))
+
+
+                    
+
+                } else {
+                    res.status(404).send(craftRequest(404));
+                }
+            })
+
+
+        }
+        
+    })
+})
+
+
+app.get("/deleteAccount", (req,res) => {
+    
+    // This is the thing about this account.
+
+    function deleteAccount(id, dbName, val) {
+        return new Promise((resolve) => {
+            updateEntry("uuid", id, {isDelete: val}, dbName).then(() => {
+                resolve();
+            })
+        })
+       
+
+    }
+
+
+    
+    try {
+
+        authenticateUser(req).then((id) => {
+            if (id === "No user found") {
+                res.status(403).send(craftRequest(403))
+            } else {
+                locateEntry("uuid", id).then((user) => {
+                    if (user !== null) {
+
+                        if (user.isDelete&&user.isDelete!==null) {
+                            deleteAccount(user.uuid, process.env.DYNAMO_NAME, null).then(() => {
+                                res.status(200).send(craftRequest(200, {message: "Your account has been recovered"}));
+                            })
+                        } else {
+                            deleteAccount(user.uuid, process.env.DYNAMO_NAME, Date.now()).then(() => {
+                                res.status(200).send(craftRequest(200,{message: "Your account will be deleted in 14 days"}));
+                            })
+                        }
+
+
+
+                       
+                    } else {
+                        locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then((user) => {
+                            if (user !== null) {
+
+
+
+
+                                if (user.isDelete&&user.isDelete!==null) {
+                                    deleteAccount(user.uuid, process.env.DYNAMO_SECONDARY, null).then(() => {
+                                        res.status(200).send(craftRequest(200,{message: "Your account has been recovered"}))
+                                    })
+                                } else {
+                                    deleteAccount(user.uuid, process.env.DYNAMO_SECONDARY, Date.now()).then(() => {
+                                        res.status(200).send(craftRequest(200,{message: "Your account will be deleted in 14 days"}))
+                                    })
+                                }
+        
+
+                               
+                            } else {
+                                res.status(400).send(craftRequest(400));
+                            }
+                        })
+                    }
+                })
+            }
+        })
+    } catch(e) {
+        console.log(e);
+        reportError(e);
+        res.status(400).send(craftRequest(400));
+    }
+
+
+})
 
 
 

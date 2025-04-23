@@ -3,6 +3,7 @@ require('dotenv').config()
 const { ScanCommand, PutCommand, DeleteCommand, GetCommand, UpdateCommand, QueryCommand } = require("@aws-sdk/lib-dynamodb")
 const documentClient = require("./dynamodbClient");
 const { table } = require('console');
+const { TableAlreadyExistsException } = require('@aws-sdk/client-dynamodb');
 async function addEntry(entry, tableName=process.env.DYNAMO_NAME) {
 
     // Add a check to see if the user is appropiately being handled here
@@ -12,19 +13,23 @@ async function addEntry(entry, tableName=process.env.DYNAMO_NAME) {
     }))
     return true;
 }
-async function removeEntry(keyName, key, tableName=process.env.DYNAMO_NAME) {
+async function removeEntry(keyName, key, tableName=process.env.DYNAMO_NAME, sortName="schoolName", sortValue="x") {
+    const keys = {
+        [keyName]: key,
+    }
+    if (tableName === process.env.DYNAMO_SECONDARY) {
+        keys[sortName] = sortValue;
+    }
     const response = await documentClient.send(new DeleteCommand({
         TableName: tableName,
-        Key: {
-            [keyName]: key
-        }
+        Key: keys
     }))
     return true;
 }
 
 
 
-async function updateEntry(keyName, keyValue, updateAttributes, tableName=process.env.DYNAMO_NAME) {
+async function updateEntry(keyName, keyValue, updateAttributes, tableName=process.env.DYNAMO_NAME,sortName="schoolName", sortValue="x") {
     // Guard against empty updateAttributes
     return new Promise(async (resolve) => {
 
@@ -43,9 +48,17 @@ async function updateEntry(keyName, keyValue, updateAttributes, tableName=proces
             expressionAttributeNames[`#${attr}`] = attr;
         });
     
+        const keys = {
+            [keyName]: keyValue
+
+        }
+
+        if (tableName===process.env.DYNAMO_SECONDARY) {
+            keys[sortName] = sortValue;
+        }
         const response = await documentClient.send(new UpdateCommand({
             TableName: tableName,
-            Key: { [keyName]: keyValue },
+            Key: keys,
             UpdateExpression: updateExpression, // <-- Fixed uppercase 'U'
             ExpressionAttributeNames: expressionAttributeNames,
             ExpressionAttributeValues: expressionAttributeValues,
@@ -63,16 +76,18 @@ async function updateEntry(keyName, keyValue, updateAttributes, tableName=proces
 }
 
 
-async function locateEntry(keyName, value, tableName=process.env.DYNAMO_NAME, overridePartition=false) {
+async function locateEntry(keyName, value, tableName=process.env.DYNAMO_NAME, overridePartition=false, sortName="schoolName", sortKey="x") {
     return new Promise(async(resolve) => {
-
-
         if ((keyName.toLowerCase() === process.env.PARTITION_KEY.toLowerCase()) && !overridePartition) {
+            const keys = {            
+                    [keyName]: value, 
+            }
+            if (tableName===process.env.DYNAMO_SECONDARY) {
+                keys[sortName] = sortKey
+            }
             const response = await documentClient.send(new GetCommand({
                 TableName: tableName,
-                Key: {
-                    [keyName]: value, 
-                }
+                Key: keys
             }))
             // console.log(response);
 
@@ -130,7 +145,40 @@ async function locateEntry(keyName, value, tableName=process.env.DYNAMO_NAME, ov
 }
 
 
-module.exports = {locateEntry, removeEntry, addEntry,updateEntry}
+
+// This would only happen for begins with kind of things
+async function searchEntry(keyName, keyValue, sortName, sortValue, tableName) {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const response = await documentClient.send(
+            new QueryCommand({
+              TableName: tableName,
+              KeyConditionExpression: "#pk = :pkVal AND begins_with(#sk, :skVal)",
+              ExpressionAttributeNames: {
+                "#pk": keyName,       // e.g., "uuid"
+                "#sk": sortName,      // e.g., "schoolName"
+              },
+              ExpressionAttributeValues: {
+                ":pkVal": keyValue,   // e.g., "SCHOOLNAMES"
+                ":skVal": sortValue,  // e.g., "into"
+              },
+            })
+          );
+        console.log(response);
+
+  
+        resolve(response.Items || null);
+      } catch (err) {
+        console.log("err here",err)
+        resolve(err);
+      }
+    });
+  }
+  
+
+
+
+module.exports = {locateEntry, removeEntry, addEntry,updateEntry, searchEntry}
 
 
 
