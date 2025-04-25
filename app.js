@@ -25,6 +25,7 @@ const Cryptr = require('cryptr');
 // const { start } = require('repl');
 
 const QRCode = require("qrcode");
+const { report } = require('process');
 
 // const e = require('express');
 
@@ -151,7 +152,7 @@ app.post("/webhook", express.raw({type: 'application/json'}), (req,res) => {
                           
                                 const updatedEvents = school.events?.map((event) => {
                                     if (event.id === metaData.eventId) {
-                                        return {...event, ticketsSold: Number(event.ticketsSold)+1, totalRevenue: Number(totalAmountGenerated), CPT: totalAmountGenerated/(event.ticketsSold+1)}
+                                        return {...event, ticketsSold: Number(event.ticketsSold)+1, totalRevenue: Number(event.totalRevenue) + Number(totalAmountGenerated), CPT: (Number(event.totalRevenue) + Number(totalAmountGenerated))/(event.ticketsSold+1)}
                                     } else {
                                         return event;
                                     }
@@ -247,7 +248,7 @@ app.get("/getTickets", (req,res) => {
                             const decryptedTickets = [];
                             console.log('we got tickets here', tickets)
                             tickets.forEach((ticket) => {
-                                if (ticket.isActive) {
+                          
                                     decryptedTickets.push({
                                         ticketId: ticket.ticketId,
                                         endDate: cmod.decrypt(ticket.endDate),
@@ -258,7 +259,7 @@ app.get("/getTickets", (req,res) => {
                                         startDate: cmod.decrypt(ticket.startDate),
                                         type: ticket.type
                                     })
-                                }
+                                
                                 
                             })
                             console.log("this is decrypted tickets",decryptedTickets);
@@ -1184,12 +1185,22 @@ app.post("/create-checkout-session", (req,res) => {
                     })
                     const formattedTickets = []
                     items.forEach((item) => {
-                        formattedTickets.push(
-                            {
-                                name: item.name,
-                                price: Number(item.price)
-                            }
-                        )
+                        // this is the items:  [
+                        //     {
+                        //       name: 'Adult Ticket',
+                        //       price: '10.00',
+                        //       amountOfTickets: '3',
+                        //       priceId: 'price_1RHu84QGW3QLsR8r1m8TZdE3'
+                        //     }
+                        for (let i=0; i<Number(item.amountOfTickets); i++) {
+                            formattedTickets.push(
+                                {
+                                    name: item.name,
+                                    price: Number(item.price)
+                                }
+                            )
+                        }
+                       
 
                         
                         
@@ -1707,7 +1718,7 @@ app.post("/getEventStats", (req,res) => {
 
 // Export ID means the stuff that is in 
 
-function exportData(exportId="d168f7ab-d8ee-4e9e-ad40-c5430e227cf4") {
+function exportData(exportId) {
 
 
     return new Promise(async(resolve) => {
@@ -1715,6 +1726,7 @@ function exportData(exportId="d168f7ab-d8ee-4e9e-ad40-c5430e227cf4") {
         try {
             if (exportId) {
                 locateEntry("eventId", exportId, process.env.DYNAMO_THIRD).then(async (tickets) => {
+                    console.log()
                     console.log("allTickets found", tickets);
                     const allBuyers = {}
                     if (tickets !== null) {
@@ -1805,6 +1817,7 @@ app.post("/exportData", (req,res) => {
                 if (exportId&&exportId.length>0&&typeof exportId === "string") {
 
                     exportData(exportId).then((x) => {
+                        console.log(x);
                         if (x!=="err") {
                             res.header('Content-Type', 'text/csv');
                             res.attachment('export.csv');
@@ -2060,6 +2073,79 @@ app.get("/deleteAccount", (req,res) => {
     }
 
 
+})
+
+
+
+// Finish this later
+app.post("/batchCreate", (req,res) => {
+    try {
+
+        authenticateUser(req).then((id) => {    
+
+            if (id === "No user found") {
+                res.status(403).send(craftRequest(403));
+            } else {
+
+
+
+
+
+
+            }
+        })
+
+
+
+
+
+    } catch(e) {
+
+
+
+        console.log(e);
+        reportError(e);
+        res.status(400).send(craftRequest(400));
+
+    }   
+
+
+})
+
+app.get("/signout", (req,res) => {
+    try {
+        authenticateUser(req).then((id) => {
+            if (id === "No user found") {
+                res.status(400).send(craftRequest(400));
+            } else {
+                req.session.user = null;
+                res.status(200).send(craftRequest(200));
+            }
+        })
+        
+
+    } catch(e) {
+
+
+
+        console.log(e);
+        reportError(e);
+        res.status(400).send(craftRequest(400));
+    }
+
+
+})
+
+
+app.post("/createFinancialProfile", (req,res) => {
+    try {
+
+    } catch(e) {
+
+
+
+        
+    }
 })
 
 
