@@ -76,7 +76,7 @@ async function updateEntry(keyName, keyValue, updateAttributes, tableName=proces
 }
 
 
-async function locateEntry(keyName, value, tableName=process.env.DYNAMO_NAME, overridePartition=false, sortName="schoolName", sortKey="x") {
+async function locateEntry(keyName, value, tableName=process.env.DYNAMO_NAME, overridePartition=false, sortName="schoolName", sortKey="x", limitAmount=1000) {
     return new Promise(async(resolve) => {
         if ((keyName.toLowerCase() === process.env.PARTITION_KEY.toLowerCase()) && !overridePartition) {
             const keys = {            
@@ -100,6 +100,10 @@ async function locateEntry(keyName, value, tableName=process.env.DYNAMO_NAME, ov
                 console.log("keyName: ", keyName);
                 console.log("value: ", value.trim());
 
+
+                
+
+
                 response = await documentClient.send(new QueryCommand({
                     TableName: tableName,
 
@@ -109,22 +113,36 @@ async function locateEntry(keyName, value, tableName=process.env.DYNAMO_NAME, ov
                     },
                     ExpressionAttributeValues: {
                         ":value": value.trim()
-                    }
+                    },
+                    Limit: limitAmount,
+                    ScanIndexForward: false
                 }));
+                if (limitAmount!==1000) {
+                    resolve({query: response.Items ||null, lastKey: response.LastEvaluatedKey })
+                }
                 
-                resolve(response.Items || null)
+                resolve({query: response.Items} || null)
                 
             } else {
+
                 response = await documentClient.send(new QueryCommand({
                     TableName: tableName,
                     IndexName: !overridePartition ? keyName+"-index" : keyName,
                     KeyConditionExpression: `${keyName} = :value`,
                     ExpressionAttributeValues: {
                         ":value": value.trim()
-                    }
+                    },
+                    Limit: limitAmount,
+                    ScanIndexForward: false
                 }));
+
+                console.log("This is the response raw", response)
                 
-                resolve(response.Items || null)
+                if (limitAmount!==1000) {
+                    resolve({query: response.Items ||null, lastKey: response.LastEvaluatedKey })
+                }
+                
+                resolve({query: response.Items} || null)
             }
             
 

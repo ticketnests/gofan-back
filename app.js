@@ -15,7 +15,7 @@ const bodyParser = require("body-parser")
 const app = express();
 const region = "us-east-1"
 const session = require("express-session");
-const { locateEntry, addEntry, updateEntry, searchEntry } = require('./databaseFunctions.js');
+const { locateEntry, addEntry, updateEntry, searchEntry, removeEntry } = require('./databaseFunctions.js');
 const MemoryStore = require('memorystore')(session)
 
 const bcrypt = require("bcrypt");
@@ -26,6 +26,7 @@ const Cryptr = require('cryptr');
 
 const QRCode = require("qrcode");
 const { report } = require('process');
+const { createTracing } = require('trace_events');
 
 // const e = require('express');
 
@@ -129,6 +130,7 @@ app.post("/webhook", express.raw({type: 'application/json'}), (req,res) => {
                             totalAmountGenerated += item.price;
                             const newTicket = {
                                 ticketId: v4(), 
+                                showTicket: true,
                                 type: item.name,
                                 price: item.price, 
                                 userId: user.uuid,
@@ -239,12 +241,17 @@ app.get("/getTickets", (req,res) => {
             } else {
                 
 
-                if (id) {
+                if (id) {   
 
-                    locateEntry("userId", id, process.env.DYNAMO_THIRD,false).then((tickets) => {
+
+                    // 1 just for testing
+
+                    locateEntry("userId", id,  process.env.DYNAMO_THIRD, false, 1).then(({query, lastKey}) => {
+
+                        const tickets = query
                         if (tickets) {
 
-
+                            
                             const decryptedTickets = [];
                             console.log('we got tickets here', tickets)
                             tickets.forEach((ticket) => {
@@ -439,7 +446,8 @@ app.post("/login", (req,res) => {
     
      
         if (isEmail(email) && isPassword(password)) {
-            locateEntry("emailHash", md5(email), isAdmin ? process.env.DYNAMO_SECONDARY : process.env.DYNAMO_NAME).then((users) => {
+            locateEntry("emailHash", md5(email), isAdmin ? process.env.DYNAMO_SECONDARY : process.env.DYNAMO_NAME).then(({query}) => {
+                const users = query;
                 if (users.length>0) {
                     console.log(users[0])
                     locateEntry("uuid", users[0].uuid,  isAdmin ? process.env.DYNAMO_SECONDARY : process.env.DYNAMO_NAME).then((user) => {
@@ -457,7 +465,12 @@ app.post("/login", (req,res) => {
                                     
                                     if (result) {
                                         setCookie(req, user.uuid);
-                                        res.status(200).send(craftRequest(200));
+                                        if (isAdmin) { 
+                                            res.status(200).send(craftRequest(200, {url: "/admindashboard"}));
+                                        } else {
+                                            res.status(200).send(craftRequest(200, {url: "/dashboard"}));
+                                        }
+                                        
                                     } else {
                                         res.status(400).send(craftRequest(400));
                                     }
@@ -471,7 +484,41 @@ app.post("/login", (req,res) => {
                         }
                     })
                 } else {
-                    res.status(400).send(craftRequest(400));
+
+                    if (isAdmin) {
+                        locateEntry("emailHash", md5(email.toLowerCase()), process.env.DYNAMO_FOURTH).then(({query}) => {
+                            const thing = query;
+
+                            if (thing.length>0) {
+
+                                bcrypt.compare(password, query[0].password, (err, result) => {
+                                    if (err) {
+                                        reportError(err);
+                                        res.status(400).send(craftRequest(400));
+                                    } else {
+
+                                        if (result) {
+                                            setCookie(req,query[0].uuid)
+                                            res.status(200).send(craftRequest(200, {url: "/scanUser"}))
+                                        } else {
+                                            res.status(400).send(craftRequest(400));
+                                        }
+                                       
+                                    }
+                                })
+
+
+
+                            } else {
+                                res.status(400).send(craftRequest(400));
+                            }
+                        })
+
+
+                    } else {
+                        res.status(400).send(craftRequest(400));
+                    }
+                 
                 }
             })
         } else {
@@ -491,6 +538,8 @@ app.post("/login", (req,res) => {
 }) 
 
 app.get("/getUser", (req,res) => {
+
+    
 
     authenticateUser(req).then((id) => {
         if (id === "No user found") {
@@ -549,7 +598,64 @@ app.get("/getUser", (req,res) => {
                             }
                             res.status(200).send(craftRequest(200, currentUser))
                         } else {
-                            res.status(400).send(craftRequest(400));
+                        
+
+
+                            locateEntry("uuid", id, process.env.DYNAMO_FOURTH).then((user) => {
+
+                                if (user !== null) {
+
+
+                                    locateEntry("uuid", user.schoolId, process.env.DYNAMO_SECONDARY).then((school) => {
+                                        if (school!==null) {
+
+
+
+                                            const eventList = []
+                                            if (school.events) {
+                                                school.events.map((event) => {
+                                                    // console.log("start date value",cmod.decrypt(event.startDate))
+                                                    const startDate = Number(cmod.decrypt(event.startDate))
+                                                    const date = new Date(startDate).toLocaleDateString("en-US", {
+                                                        year: "2-digit",
+                                                        month: "numeric",
+                                                        day: "numeric",
+                                                      })
+                                                eventList.push({
+                                                    id: event.id,
+                                                    date: date,
+                                                    type: cmod.decrypt(event.type),
+                                                    startDate: startDate,
+                                                    endDate: cmod.decrypt(event.endDate),
+                                                    name: cmod.decrypt(event.name),
+                                                })
+                                            }   )
+                                            }
+                                            
+
+                                            const x = {
+                                                isSecurity: true,
+                                                isAdmin: false,
+                                                name: cmod.decrypt(user.name),
+                                                email: cmod.decrypt(user.email),
+                                                schoolId: user.schoolId,
+                                                events: eventList
+                                            }
+        
+                                            res.status(200).send(craftRequest(200, x));
+                                        } else {
+                                            res.status(400).send(craftRequest(400));
+                                        }
+
+                                    })
+
+                                   
+
+
+                                } else {
+                                    res.status(400).send(craftRequest(400));
+                                }
+                            })
                         }
                     })
 
@@ -1153,96 +1259,112 @@ app.post("/createEvent", (req,res) => {
 
 
 app.post("/create-checkout-session", (req,res) => {
-
     try {
-
-
-
         authenticateUser(req).then(async(id) => {
             if (id === "No user found") {
                 res.status(403).send(craftRequest(403));
             } else {
                 const {items, eventId, startDate, endDate, name, school,schoolId} = req.body;
-                // bookmark
-        
-                if (items!=undefined&&schoolId!==undefined&&schoolId!==null&&schoolId.length<1000 &&items!=null&& items.length>0&&eventId!=undefined&&eventId!=null&&eventId.length>0&&isNumber(startDate)&&isNumber(endDate)&&isString(name, 100)&&isString(school, 100)) {
-                    // {
-                    //     // Provide the exact Price ID (for example, pr_1234) of the product you want to sell
-                    //     price: '{{PRICE_ID}}',
-                    //     quantity: 1,
-                    //   },
-                    
 
-                    console.log("this is the items: ",items);
-                    const lineItems = items.map((item) => {
-                        if (item.amountOfTickets > 0) {
-                            return {
-                                quantity: item.amountOfTickets==="" ? 0 : item.amountOfTickets,
-                                price: item.priceId,
+                if (Array.isArray(items)) {
+                    let totalAmt = 0;
+                    for (let i=0; i<items.length; i++) {
+                        totalAmt += Number(items[i].amountOfTickets) || 0
+                    }
+
+                    if (totalAmt > process.env.MAX_TICKETS) {
+                        res.status(400).send(craftRequest(400));
+                        return
+                    }
+
+                    if (items!=undefined&&schoolId!==undefined&&schoolId!==null&&schoolId.length<1000 &&items!=null&& items.length>0&&eventId!=undefined&&eventId!=null&&eventId.length>0&&isNumber(startDate)&&isNumber(endDate)&&isString(name, 100)&&isString(school, 100)) {
+                        // {
+                        //     // Provide the exact Price ID (for example, pr_1234) of the product you want to sell
+                        //     price: '{{PRICE_ID}}',
+                        //     quantity: 1,
+                        //   },
+    
+    
+                        
+    
+                        console.log("this is the items: ",items);
+                        const lineItems = items.map((item) => {
+                            if (item.amountOfTickets > 0) {
+                                return {
+                                    quantity: item.amountOfTickets==="" ? 0 : item.amountOfTickets,
+                                    price: item.priceId,
+                                }
                             }
-                        }
+                            
+                        })
+                        const formattedTickets = []
+                        items.forEach((item) => {
+                            // this is the items:  [
+                            //     {
+                            //       name: 'Adult Ticket',
+                            //       price: '10.00',
+                            //       amountOfTickets: '3',
+                            //       priceId: 'price_1RHu84QGW3QLsR8r1m8TZdE3'
+                            //     }
+                            for (let i=0; i<Number(item.amountOfTickets); i++) {
+                                formattedTickets.push(
+                                    {
+                                        name: item.name,
+                                        price: Number(item.price)
+                                    }
+                                )
+                            }
+                           
+    
+                            
+                            
+                        })
                         
-                    })
-                    const formattedTickets = []
-                    items.forEach((item) => {
-                        // this is the items:  [
-                        //     {
-                        //       name: 'Adult Ticket',
-                        //       price: '10.00',
-                        //       amountOfTickets: '3',
-                        //       priceId: 'price_1RHu84QGW3QLsR8r1m8TZdE3'
-                        //     }
-                        for (let i=0; i<Number(item.amountOfTickets); i++) {
-                            formattedTickets.push(
-                                {
-                                    name: item.name,
-                                    price: Number(item.price)
-                                }
-                            )
-                        }
-                       
+                        console.log(lineItems);
+                        // uuid: user.uuid,
+                        // isActive: true,
+                        // eventId: metaData.eventId,
+                        // startDate: cmod.encrypt(metaData.startDate),
+                        // endDate: cmod.encrypt(metaData.endDate),
+                        // name: cmod.encrypt(metaData.name),
+                        // school: cmod.encrypt(metaData.school),
+                        const session = await stripe.checkout.sessions.create({
+                            line_items: lineItems,
+                            mode: "payment",
+                            payment_intent_data: {
+                                    metadata: {
+                                        uuid: id,
+                                        eventId: eventId,
+                                        startDate: startDate,
+                                        endDate: endDate,
+                                        name: name,
+                                        school: school,
+                                        schoolId: schoolId,
+                                        allBought: JSON.stringify(formattedTickets)
+                                   
+                                        
+                                    }
+                            },
+                            success_url: process.env.NODE_ENV==="DEV" ? "http://localhost:5173/dashboard" : "https://ticketnest.us/dashboard",
+                            cancel_url: process.env.NODE_ENV==="DEV" ? "http://localhost:5173/" : "https://ticketnest.us/dashboard"
+                        })
+                        console.log("Session: ",session);
+                        console.log("Session: ",session.url);
+                        res.status(200).send(craftRequest(200, {url: session.url}))
+            
+            
+                        
+                    } else {
+                        res.status(400).send(craftRequest(400));
+                    }
 
-                        
-                        
-                    })
-                    
-                    console.log(lineItems);
-                    // uuid: user.uuid,
-                    // isActive: true,
-                    // eventId: metaData.eventId,
-                    // startDate: cmod.encrypt(metaData.startDate),
-                    // endDate: cmod.encrypt(metaData.endDate),
-                    // name: cmod.encrypt(metaData.name),
-                    // school: cmod.encrypt(metaData.school),
-                    const session = await stripe.checkout.sessions.create({
-                        line_items: lineItems,
-                        mode: "payment",
-                        payment_intent_data: {
-                                metadata: {
-                                    uuid: id,
-                                    eventId: eventId,
-                                    startDate: startDate,
-                                    endDate: endDate,
-                                    name: name,
-                                    school: school,
-                                    schoolId: schoolId,
-                                    allBought: JSON.stringify(formattedTickets)
-                               
-                                    
-                                }
-                        },
-                        success_url: process.env.NODE_ENV==="DEV" ? "http://localhost:5173/dashboard" : "https://ticketnest.us/dashboard",
-                        cancel_url: process.env.NODE_ENV==="DEV" ? "http://localhost:5173/" : "https://ticketnest.us/dashboard"
-                    })
-                    console.log("Session: ",session);
-                    console.log("Session: ",session.url);
-                    res.status(200).send(craftRequest(200, {url: session.url}))
-        
-        
-                    
+
+
+
                 } else {
                     res.status(400).send(craftRequest(400));
                 }
+               
             }
         })
        
@@ -1446,16 +1568,8 @@ app.post("/scanUser", (req,res) => {
 
     try {
         const {uuid, eventId} = req.body;
-
-        if (isString(uuid, 100) && isString(eventId, 100)) {
-            authenticateUser(req).then((id) => {
-                if (id === "No user found") {
-                    res.status(403).send(craftRequest(403))
-                } else {
-    
-                    locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then((adminUser) => {
-                        if (adminUser !== null) {
-                            console.log("adminUser.events: ", adminUser.events)
+        function doScanning(adminUser) {
+            console.log("adminUser.events: ", adminUser.events)
                             let passedTest = false;
                             for (let i=0; i<adminUser.events.length; i++) {
                                 if (adminUser.events[i].id === eventId) {
@@ -1466,14 +1580,15 @@ app.post("/scanUser", (req,res) => {
                             }
                         
                             if (toString(uuid, 100) && passedTest) {
-    
-                                locateEntry("ticketId", uuid, process.env.DYNAMO_THIRD,true).then(async (ticket) => {
-                                    if (ticket !== null) {
-
+                                // bookmark, could cause errors
+                                locateEntry("ticketId", uuid, process.env.DYNAMO_THIRD, true).then(async ({query}) => {
+                                    const ticket = query;
+                                    if (ticket.length>0) {
+                                        console.log("heres ticket", ticket)
                                         if (ticket[0].isActive) {
                                             locateEntry("uuid", ticket[0].userId).then((user) => {
                                                 if (user !==null) {
-    
+                                                    
                                                     const body = {
                                                         uuid: ticket[0].userId,
                                                         ticket: {
@@ -1512,7 +1627,18 @@ app.post("/scanUser", (req,res) => {
                                 console.log("this was called #2")
                                 res.status(400).send(craftRequest(400));
                             }
+        }
+
+        if (isString(uuid, 100) && isString(eventId, 100)) {
+            authenticateUser(req).then((id) => {
+                if (id === "No user found") {
+                    res.status(403).send(craftRequest(403))
+                } else {
     
+                    locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then((adminUser) => {
+                        if (adminUser !== null) {
+                            
+                            doScanning(adminUser)
     
                             // We could potentially add some feature here which only allows people to search if they go to the same school or same school county
     
@@ -1521,7 +1647,30 @@ app.post("/scanUser", (req,res) => {
     
     
                         } else {
-                            res.status(403).send(craftRequest(403));
+                            locateEntry("uuid", id, process.env.DYNAMO_FOURTH).then((user) => {
+                                if (user !== null) {
+                                    locateEntry("uuid", user.schoolId, process.env.DYNAMO_SECONDARY).then((adminUser) => {
+                                        if (adminUser!==null) {
+                                            doScanning(adminUser)
+
+
+
+
+                                        } else {
+                                            res.status(400).send(craftRequest(400));
+                                        }
+
+
+                                    })
+
+
+
+                                } else {
+                                    res.status(400).send(craftRequest(400));
+                                }
+
+                                
+                            })
                         }
     
                     })
@@ -1649,7 +1798,8 @@ app.post("/getEventStats", (req,res) => {
         
         
                     // Double check if that is the index that is meant to be used for that
-                    locateEntry("eventId", eventId, process.env.DYNAMO_THIRD).then(async (tickets) => {
+                    locateEntry("eventId", eventId, process.env.DYNAMO_THIRD, undefined).then(async ({query}) => {
+                        const tickets = query;
                         console.log("allTickets found", tickets);
                         if (tickets !== null) {
                             // Process each ticket sequentially
@@ -1804,8 +1954,6 @@ function exportData(exportId) {
 }
 
 app.post("/exportData", (req,res) => {
-    
-
     try {
         authenticateUser(req).then((id) => {
             if (id === "No user found") {
@@ -1833,10 +1981,6 @@ app.post("/exportData", (req,res) => {
                 }
             }
         })
-
-
-
-
     } catch(e) {
         console.log(e);
         reportError(e);
@@ -1852,7 +1996,7 @@ app.post("/exportData", (req,res) => {
 
 
 
-
+// Make it so that people can toggle events as inactive
 app.post("/updateEvent",(req,res) => {
 
 
@@ -2137,16 +2281,329 @@ app.get("/signout", (req,res) => {
 })
 
 
-app.post("/createFinancialProfile", (req,res) => {
+
+// This sends the email which would make the security emails.
+app.post("/sendSecurity", (req,res) => {
     try {
+
+        const {email} = req.body;
+      
+
+        if (typeof email === "string" &&isEmail(email)) {
+            authenticateUser(req).then((id) => {
+                if (id === "No user found") {
+                    res.status(400).send(craftRequest(400));
+                } else {
+                    locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then(async (school) => {
+                        if (school!==null) {
+                        
+
+                            locateEntry("emailHash", md5(email.toLowerCase()), process.env.DYNAMO_FOURTH).then(async({query}) => {
+                                if (query!==null&&query.length>0) {
+
+                                    console.log("query", query)
+                                    const html =   `<!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <title>Invitation Email</title>
+        </head>
+        <body style="margin:0; padding:0; background-color:#121212; color:#ffffff; font-family:Arial, sans-serif;">
+          <table align="center" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px; margin:auto;">
+            <tr>
+              <td style="padding:40px 30px; background-color:#1e1e1e; border-radius:8px;">
+                <h2 style="color:#ffffff; margin-top:0;">Hello,</h2>
+                <p style="font-size:16px; line-height:1.5; color:#cccccc;">
+                  You were invited by <strong style="color:#ffffff;">${cmod.decrypt(school.name)}</strong> to become a security guard.
+                </p>
+                <p style="font-size:16px; line-height:1.5; color:#cccccc;">
+                  To be able to scan tickets, please finish creating your account by clicking the button below:
+                </p>
+                <div style="text-align:center; margin:30px 0;">
+                  <a href="${process.env.NODE_ENV ? "http://localhost:5173/createSecurity/" + query.uuid : "https://ticketnest.us/createSecurity/" + query.uuid}" style="background-color:#4CAF50; color:#ffffff; padding:14px 24px; text-decoration:none; font-size:16px; border-radius:5px; display:inline-block;">
+                    Finish Creating Account
+                  </a>
+                </div>
+                <p style="font-size:12px; color:#777777; text-align:center;">
+                  If you did not expect this email, you can safely ignore it.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </body>
+        </html>
+        
+        `
+                                    sendEmail(email.trim(), "Create Security Account for ticketnest", html).then(() => {
+                                        res.status(200).send(craftRequest(200));
+                                    })
+                                 
+                                } else {
+                                    const uuid = v4();
+                                    const newThing = {
+                                        uuid: uuid,
+                                        schoolId: id,
+                                        emailHash: md5(email.toLowerCase()),
+                                        email: cmod.encrypt(email.toLowerCase())
+                                    };
+        
+        
+                                    const html =   `<!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <title>Invitation Email</title>
+        </head>
+        <body style="margin:0; padding:0; background-color:#121212; color:#ffffff; font-family:Arial, sans-serif;">
+          <table align="center" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px; margin:auto;">
+            <tr>
+              <td style="padding:40px 30px; background-color:#1e1e1e; border-radius:8px;">
+                <h2 style="color:#ffffff; margin-top:0;">Hello,</h2>
+                <p style="font-size:16px; line-height:1.5; color:#cccccc;">
+                  You were invited by <strong style="color:#ffffff;">${cmod.decrypt(school.name)}</strong> to become a security guard.
+                </p>
+                <p style="font-size:16px; line-height:1.5; color:#cccccc;">
+                  To be able to scan tickets, please finish creating your account by clicking the button below:
+                </p>
+                <div style="text-align:center; margin:30px 0;">
+                  <a href="${process.env.NODE_ENV ? "http://localhost:5173/createSecurity/" + uuid : "https://ticketnest.us/createSecurity/" + uuid}" style="background-color:#4CAF50; color:#ffffff; padding:14px 24px; text-decoration:none; font-size:16px; border-radius:5px; display:inline-block;">
+                    Finish Creating Account
+                  </a>
+                </div>
+                <p style="font-size:12px; color:#777777; text-align:center;">
+                  If you did not expect this email, you can safely ignore it.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </body>
+        </html>
+        
+        `
+                                    addEntry(newThing, process.env.DYNAMO_FOURTH).then(() => {
+                                        sendEmail(email.trim(), "Create Security Account for ticketnest", html).then(() => {
+                                        res.status(200).send(craftRequest(200));
+                                    })
+                                
+                                    })
+                                    
+                         
+        
+                                }
+                            })
+
+
+
+                           
+                        } else {
+                            res.status(400).send(craftRequest(400));
+                        }
+                    })
+
+
+              
+
+
+
+                    
+    
+    
+                }
+                
+            })
+        } else {
+            res.status(400).send(craftRequest(400));
+        }
+      
+
+
 
     } catch(e) {
 
 
-
+        console.log(e);
+        reportError(e);
+        res.status(400).send(craftRequest(400));
+        
         
     }
 })
+
+
+
+
+app.post("/createSecurity", (req,res) => {
+    try {
+
+
+        const {name, uuid, password} = req.body;
+
+
+        if (isString(name) && uuid && isPassword(password)) {
+            bcrypt.hash(password, saltRounds, (err,hash) => {
+                if (err) {
+                    console.log(2);
+                    res.status(400).send(craftRequest(400));
+                    reportError(err);
+                } else {
+
+                    locateEntry("uuid", uuid, process.env.DYNAMO_FOURTH).then((security) => {
+                        if (security !==null) {
+
+                            console.log("this is here", name)
+                            updateEntry("uuid", uuid, {
+                                name: cmod.encrypt(formatString(name.toLowerCase())),
+                                password: hash
+                            }, process.env.DYNAMO_FOURTH).then(() => {
+                                // Potential Vulnerability here as we aren't even checking if the uuid is valid yet we are still trying to update it. 
+                                req.session.user = uuid;
+                                res.status(200).send(craftRequest(200))
+                            })
+
+                        } else {
+                            console.log(3);
+                            res.status(400).send(craftRequest(400))
+                        }
+                    })
+
+                   
+        
+                }
+            })
+            
+
+            
+
+        
+
+
+
+
+            
+
+
+
+
+
+
+
+
+
+        } else {
+            console.log(1)
+            res.status(400).send(craftRequest(400));
+        }
+
+
+        
+
+
+
+
+
+
+
+
+
+
+
+    } catch(e) {
+        console.log(e);
+        reportError(e);
+
+
+        res.status(400).send(craftRequest(400))
+    }
+})
+
+
+
+app.get("/getSecurity", (req,res) => {
+    try {
+        
+        authenticateUser(req).then((id) => {
+            if (id === "No user found") {
+                res.status(400).send(craftRequest(400));
+            } else {
+                
+                locateEntry('schoolId', id, process.env.DYNAMO_FOURTH).then(({query}) => {
+                    const allSecurity = query
+
+
+                    res.status(200).send(craftRequest(200, allSecurity.map((person) => ({
+                        email: cmod.decrypt(person.email),
+                        name: (person.name ? cmod.decrypt(person.name) : null),
+                        uuid: person.uuid,
+                        hasCompleted: (person.name ? true : false),
+                    }))))
+
+
+
+
+
+
+                })
+
+
+
+
+
+            }
+        })
+
+    } catch(e) {
+
+
+        console.log(e);
+        reportError(e);
+        res.status(400).send(craftRequest(400));
+    }
+})
+
+
+app.post("/deleteSecurity", (req,res) => {
+    try {
+        
+
+        const {uuid} = req.body;
+        
+
+        authenticateUser(req).then((id) => {
+            if (id === "No user found") {
+                res.status(400).send(craftRequest(400));
+            } else {
+                locateEntry("uuid", uuid, process.env.DYNAMO_FOURTH).then((user) => {
+                    if (user.schoolId === id) {
+                        removeEntry("uuid", uuid, process.env.DYNAMO_FOURTH).then(() => {
+                            res.status(200).send(craftRequest(200));
+                        })
+                    } else {
+                        res.status(400).send(craftRequest(400));
+
+                    }
+                })
+            }
+        })
+
+
+
+
+
+
+    } catch(e) {
+
+        console.log(e);
+        reportError(e);
+        res.status(400).send(craftRequest(400));
+    }
+
+
+})
+
+
+
+
+
 
 
 
@@ -2162,3 +2619,45 @@ server.listen(process.env.PORT, () => {
 
 
 
+// body-parser
+// app.use(bodyParser.json())
+
+
+// async function register(name, email, password)
+
+// const name = req.body.name;
+// const email = req.body.email;
+// const password = req.body.email;
+// const etrasdf = req.body.email;
+// ...
+
+// {name: "bob", email: "asdf@gmail.com", password: "asdfasdf"};
+
+// const {name, email, password, etrasdf} = req.body;
+
+
+// POST
+
+// 
+
+// /login
+// POST
+
+
+// /getUser         getUser() {}
+// GET
+
+
+
+
+// /getTickets
+
+
+// /changePassword
+
+// POST
+
+
+// /confirmEmail
+
+// 

@@ -46,10 +46,11 @@ async function sendEmail(to, subject, text) {
         if ( (to.length>0) && (subject.length>0) && (text.length>0) ) {
     
             const info = await transporter.sendMail({
+
                 from: process.env.EMAIL_SENDER, // sender address
                 to: to, // list of receivers
                 subject: subject, // Subject line
-                text: text  
+                html: text  
             });
     
             resolve(true);
