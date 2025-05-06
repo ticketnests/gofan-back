@@ -931,8 +931,8 @@ app.post("/createSchool", (req,res) => {
 
         if (isEmail(email) && isString(name, 30) && schoolAddress.length<1000) {
             
-            locateEntry("emailHash", md5(email),process.env.DYNAMO_SECONDARY).then((users) => {
-                
+            locateEntry("emailHash", md5(email),process.env.DYNAMO_SECONDARY).then(({query}) => {
+                const users = query;
                 if (users.length === 0) {
                    
 
