@@ -2525,24 +2525,27 @@ app.get("/getSecurity", (req,res) => {
             if (id === "No user found") {
                 res.status(400).send(craftRequest(400));
             } else {
-                
-                locateEntry('schoolId', id, process.env.DYNAMO_FOURTH).then(({query}) => {
-                    const allSecurity = query
-
-
-                    res.status(200).send(craftRequest(200, allSecurity.map((person) => ({
-                        email: cmod.decrypt(person.email),
-                        name: (person.name ? cmod.decrypt(person.name) : null),
-                        uuid: person.uuid,
-                        hasCompleted: (person.name ? true : false),
-                    }))))
-
-
-
-
-
-
-                })
+                try {
+                    locateEntry('schoolId', id, process.env.DYNAMO_FOURTH).then(({query}) => {
+                        const allSecurity = query
+    
+    
+                        res.status(200).send(craftRequest(200, allSecurity.map((person) => ({
+                            email: cmod.decrypt(person.email),
+                            name: (person.name ? cmod.decrypt(person.name) : null),
+                            uuid: person.uuid,
+                            hasCompleted: (person.name ? true : false),
+                        }))))
+    
+    
+    
+    
+    
+    
+                    })
+                } catch(e) {
+                    res.status(200).send(craftRequest(200, []));
+                }
 
 
 
