@@ -1875,8 +1875,8 @@ function exportData(exportId) {
         
         try {
             if (exportId) {
-                locateEntry("eventId", exportId, process.env.DYNAMO_THIRD).then(async (tickets) => {
-                    console.log()
+                locateEntry("eventId", exportId, process.env.DYNAMO_THIRD).then(async ({query}) => {
+                    const tickets = query
                     console.log("allTickets found", tickets);
                     const allBuyers = {}
                     if (tickets !== null) {
@@ -2546,7 +2546,6 @@ app.get("/getSecurity", (req,res) => {
                 } catch(e) {
                     res.status(200).send(craftRequest(200, []));
                 }
-
 
 
 
