@@ -151,10 +151,10 @@ app.post("/webhook", express.raw({type: 'application/json'}), (req,res) => {
                             if (school!=null) {
                                 // const prevEvents = school.events;
                                 
-                          
+                                
                                 const updatedEvents = school.events?.map((event) => {
                                     if (event.id === metaData.eventId) {
-                                        return {...event, ticketsSold: Number(event.ticketsSold)+1, totalRevenue: Number(event.totalRevenue) + Number(totalAmountGenerated), CPT: (Number(event.totalRevenue) + Number(totalAmountGenerated))/(event.ticketsSold+1)}
+                                        return {...event, ticketsSold: Number(event.ticketsSold)+JSON.parse(metaData.allBought).length, totalRevenue: Number(event.totalRevenue) + Number(totalAmountGenerated), CPT: (Number(event.totalRevenue) + Number(totalAmountGenerated))/(event.ticketsSold+1)}
                                     } else {
                                         return event;
                                     }
