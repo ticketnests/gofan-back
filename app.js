@@ -25,8 +25,8 @@ const Cryptr = require('cryptr');
 // const { start } = require('repl');
 
 const QRCode = require("qrcode");
-const { report } = require('process');
-const { createTracing } = require('trace_events');
+// const { report } = require('process');
+// const { createTracing } = require('trace_events');
 
 // const e = require('express');
 
@@ -1264,7 +1264,11 @@ app.post("/create-checkout-session", (req,res) => {
             if (id === "No user found") {
                 res.status(403).send(craftRequest(403));
             } else {
-                const {items, eventId, startDate, endDate, name, school,schoolId} = req.body;
+
+
+                locateEntry("uuid", id).then(async(user) => {
+                    if (user!==null) {
+                        const {items, eventId, startDate, endDate, name, school,schoolId} = req.body;
 
                 if (Array.isArray(items)) {
                     let totalAmt = 0;
@@ -1364,6 +1368,14 @@ app.post("/create-checkout-session", (req,res) => {
                 } else {
                     res.status(400).send(craftRequest(400));
                 }
+
+                    } else {
+                        res.status(400).send(craftRequest(400));
+                    }
+                })
+
+
+                
                
             }
         })
