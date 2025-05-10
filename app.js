@@ -142,6 +142,7 @@ app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
                     endDate: cmod.encrypt(metaData.endDate),
                     name: cmod.encrypt(metaData.name),
                     school: cmod.encrypt(metaData.school),
+                    dateBought: Date.now(),
                   };
 
                   addEntry(newTicket, process.env.DYNAMO_THIRD).then(() => {
@@ -2107,6 +2108,149 @@ app.post("/deleteSecurity", (req, res) => {
     res.status(400).send(craftRequest(400));
   }
 });
+
+
+
+
+
+
+app.get("/getFinancialsGraph", (req,res) => {
+
+    try {
+        console.log(req.query)
+        // console.log("this is the query", req.query.timeInterval)
+        const allowedDays = [7,30,365]
+        const timeInterval = req.query.timeInterval;
+
+        authenticateUser(req).then((id) => {
+            if (id === "No user found") {
+                console.log("no user found")
+                res.status(400).send(craftRequest(400));
+            } else {
+                console.log("this is the time interval", timeInterval);
+                console.log("this is the first check", allowedDays.includes(Number(timeInterval)));
+                if (allowedDays.includes(Number(timeInterval))) {
+                    locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then((school) => {
+                        if (school!==null) {
+                            
+
+                          
+
+                            console.log("this is the school", school);
+                            const events = school.events || [];
+                            const datesUsed = []
+                            const addedData = []
+
+                            for (let i=0; i<events.length; i++) {
+                                const currEvent = events[i];
+                                const currId = events[i].id;
+                                console.log("this is the first event being tried")
+
+                                if (Math.abs(Date.now()-cmod.decrypt(currEvent.startDate)) < Number(timeInterval)*24*60*60*1000) {
+                                    locateEntry("eventId", currId, process.env.DYNAMO_THIRD).then(({query}) => {
+                                        console.log("first batch of tickets being logged", query);
+                                        const tickets = query;
+                                        
+
+                                        tickets.forEach((ticket) => {
+                                            const ticketDate = new Date(ticket.dateBought).toLocaleDateString("en-US", {
+                                                year: "numeric",
+                                                month: "2-digit",
+                                                day: "2-digit"
+                                            })
+                                            const idx = datesUsed.indexOf(ticketDate);
+                                            if (idx !== -1) {
+                                                addedData[idx].amount += ticket.price
+                                            } else {
+                                                datesUsed.push(ticketDate)
+                                                addedData.push({
+                                                    date: ticketDate,
+                                                    amount: ticket.price
+                                                })
+                                            }
+
+
+                                        })
+                                        
+                                        console.log("this is the added data", addedData);
+                                        
+                                        
+                                        
+
+    
+    
+    
+                                    })
+    
+
+
+                                }  else {
+                                    console.log('failed the bought time check')
+                                }
+                               
+
+                               
+
+
+                            }
+
+                            res.status(200).send(craftRequest(200, addedData));
+
+
+
+
+                        } else {
+                            res.status(400).send(craftRequest(400));
+                        }
+                    })
+
+
+
+
+                }  else {
+                    res.status(400).send(craftRequest(400));
+                }
+            
+            }
+
+        })
+        
+
+
+
+    } catch(e) {
+        console.log(e);
+        reportError(e);
+        res.status(400).send(craftRequest(400));
+    }
+
+
+
+
+
+
+
+
+
+})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 server.listen(process.env.PORT, () => {
   console.log("Listening on port:", process.env.PORT);
