@@ -1624,6 +1624,7 @@ app.post("/updateEvent", (req, res) => {
                   if (events[i].id === event.id) {
                     events[i].name = cmod.encrypt(event.name);
                     events[i].description = cmod.encrypt(event.description);
+                    events[i].isActive = event.isActive;
                     break;
                   }
                 }
