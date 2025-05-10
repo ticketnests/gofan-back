@@ -1,0 +1,31 @@
+name: Deploy via SSH
+
+on:
+  workflow_run:
+    workflows: ["Build via SSH"]
+    types:
+      - completed
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Deploy SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SERVER_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.DEPLOY_SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: SSH and Deploy
+        run: |
+          ssh -i ~/.ssh/id_ed25519 ${{ secrets.DEPLOY_SERVER_USER }}@${{ secrets.DEPLOY_SERVER_HOST }} '
+            echo "[Deploy] Switching to ticketnest-backend directory..." &&
+            cd ~/docker/ticketnest-backend &&
+            echo "[Deploy] Pulling latest Docker image with compose..." &&
+            docker compose pull &&
+            echo "[Deploy] Recreating containers..." &&
+            docker compose up -d
+          '

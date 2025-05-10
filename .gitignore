@@ -1,11 +1,9 @@
 # npm
 node_modules
-package-lock.json
+# package-lock.json
 npm-shrinkwrap.json
 *.log
 *.gz
-
-
 
 .env
 # Coveralls
