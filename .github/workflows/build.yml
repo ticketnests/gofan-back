@@ -3,7 +3,7 @@ name: Build via SSH
 on:
   push:
     branches:
-      - main
+      - master
 
 jobs:
   deploy:
