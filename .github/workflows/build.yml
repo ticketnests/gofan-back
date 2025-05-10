@@ -1,0 +1,25 @@
+name: Build via SSH
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Build SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.BUILD_SERVER_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.BUILD_SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: SSH and Build
+        run: |
+          ssh -i ~/.ssh/id_ed25519 ${{ secrets.BUILD_SERVER_USER }}@${{ secrets.BUILD_SERVER_HOST }} '
+            cd /home/linux1/ticketnest/gofan-back &&
+            /home/linux1/ticketnest/scripts/build-and-push.sh >> /home/linux1/ticketnest/logs/github-actions.log 2>&1
+          '
