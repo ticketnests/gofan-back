@@ -2130,7 +2130,7 @@ app.get("/getFinancialsGraph", (req,res) => {
                 console.log("this is the time interval", timeInterval);
                 console.log("this is the first check", allowedDays.includes(Number(timeInterval)));
                 if (allowedDays.includes(Number(timeInterval))) {
-                    locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then((school) => {
+                    locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then(async(school) => {
                         if (school!==null) {
                             
 
@@ -2140,6 +2140,20 @@ app.get("/getFinancialsGraph", (req,res) => {
                             const events = school.events || [];
                             const datesUsed = []
                             const addedData = []
+                            for (let i=0; i<timeInterval; i++) {
+                                console.log("this is happening right now")
+                                datesUsed.push(new Date(Date.now() - (i*24*60*60*1000)).toLocaleDateString("en-US", {
+                                    year: "numeric",
+                                    month: "2-digit",
+                                    day: "2-digit"
+                                }))
+                                addedData.push({
+                                    date: datesUsed[i],
+                                    amount: 0
+                                })
+
+
+                            }
 
                             for (let i=0; i<events.length; i++) {
                                 const currEvent = events[i];
@@ -2147,11 +2161,9 @@ app.get("/getFinancialsGraph", (req,res) => {
                                 console.log("this is the first event being tried")
 
                                 if (Math.abs(Date.now()-cmod.decrypt(currEvent.startDate)) < Number(timeInterval)*24*60*60*1000) {
-                                    locateEntry("eventId", currId, process.env.DYNAMO_THIRD).then(({query}) => {
+                                    await locateEntry("eventId", currId, process.env.DYNAMO_THIRD).then(({query}) => {
                                         console.log("first batch of tickets being logged", query);
                                         const tickets = query;
-                                        
-
                                         tickets.forEach((ticket) => {
                                             const ticketDate = new Date(ticket.dateBought).toLocaleDateString("en-US", {
                                                 year: "numeric",
@@ -2168,10 +2180,7 @@ app.get("/getFinancialsGraph", (req,res) => {
                                                     amount: ticket.price
                                                 })
                                             }
-
-
                                         })
-                                        
                                         console.log("this is the added data", addedData);
                                         
                                         
@@ -2194,6 +2203,8 @@ app.get("/getFinancialsGraph", (req,res) => {
 
                             }
 
+
+                            console.log('we just cleared everything')
                             res.status(200).send(craftRequest(200, addedData));
 
 
