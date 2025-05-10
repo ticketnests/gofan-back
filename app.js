@@ -703,112 +703,9 @@ app.post("/changePassword", (req, res) => {
                   bcrypt.hash(password, saltRounds, function (err, hash) {
                     // Store hash in your password DB.
 
-<<<<<<< HEAD
-app.post("/create-checkout-session", (req,res) => {
-    try {
-        authenticateUser(req).then(async(id) => {
-            if (id === "No user found") {
-                res.status(403).send(craftRequest(403));
-            } else {
-
-
-                locateEntry("uuid", id).then(async(user) => {
-                    if (user!==null) {
-                        const {items, eventId, startDate, endDate, name, school,schoolId} = req.body;
-
-                if (Array.isArray(items)) {
-                    let totalAmt = 0;
-                    for (let i=0; i<items.length; i++) {
-                        totalAmt += Number(items[i].amountOfTickets) || 0
-                    }
-
-                    if (totalAmt > process.env.MAX_TICKETS) {
-                        res.status(400).send(craftRequest(400));
-                        return
-                    }
-
-                    if (items!=undefined&&schoolId!==undefined&&schoolId!==null&&schoolId.length<1000 &&items!=null&& items.length>0&&eventId!=undefined&&eventId!=null&&eventId.length>0&&isNumber(startDate)&&isNumber(endDate)&&isString(name, 100)&&isString(school, 100)) {
-                        // {
-                        //     // Provide the exact Price ID (for example, pr_1234) of the product you want to sell
-                        //     price: '{{PRICE_ID}}',
-                        //     quantity: 1,
-                        //   },
-    
-    
-                        
-    
-                        console.log("this is the items: ",items);
-                        const lineItems = items.map((item) => {
-                            if (item.amountOfTickets > 0) {
-                                return {
-                                    quantity: item.amountOfTickets==="" ? 0 : item.amountOfTickets,
-                                    price: item.priceId,
-                                }
-                            }
-                            
-                        })
-                        const formattedTickets = []
-                        items.forEach((item) => {
-                            // this is the items:  [
-                            //     {
-                            //       name: 'Adult Ticket',
-                            //       price: '10.00',
-                            //       amountOfTickets: '3',
-                            //       priceId: 'price_1RHu84QGW3QLsR8r1m8TZdE3'
-                            //     }
-                            for (let i=0; i<Number(item.amountOfTickets); i++) {
-                                formattedTickets.push(
-                                    {
-                                        name: item.name,
-                                        price: Number(item.price)
-                                    }
-                                )
-                            }
-                           
-    
-                            
-                            
-                        })
-                        
-                        console.log(lineItems);
-                        // uuid: user.uuid,
-                        // isActive: true,
-                        // eventId: metaData.eventId,
-                        // startDate: cmod.encrypt(metaData.startDate),
-                        // endDate: cmod.encrypt(metaData.endDate),
-                        // name: cmod.encrypt(metaData.name),
-                        // school: cmod.encrypt(metaData.school),
-                        const session = await stripe.checkout.sessions.create({
-                            line_items: lineItems,
-                            mode: "payment",
-                            payment_intent_data: {
-                                    metadata: {
-                                        uuid: id,
-                                        eventId: eventId,
-                                        startDate: startDate,
-                                        endDate: endDate,
-                                        name: name,
-                                        school: school,
-                                        schoolId: schoolId,
-                                        allBought: JSON.stringify(formattedTickets)
-                                   
-                                        
-                                    }
-                            },
-                            success_url: process.env.NODE_ENV==="DEV" ? "http://localhost:5173/dashboard" : "https://ticketnest.us/dashboard",
-                            cancel_url: process.env.NODE_ENV==="DEV" ? "http://localhost:5173/" : "https://ticketnest.us/dashboard"
-                        })
-                        console.log("Session: ",session);
-                        console.log("Session: ",session.url);
-                        res.status(200).send(craftRequest(200, {url: session.url}))
-            
-            
-                        
-=======
                     if (err) {
                       reportError(err);
                       res.status(400).send(craftRequest(400));
->>>>>>> 1e2a2f100a5703208071912a995381020f84f175
                     } else {
                       updateEntry("uuid", user.uuid, { password: hash }).then(
                         (x) => {
@@ -822,23 +719,11 @@ app.post("/create-checkout-session", (req,res) => {
                     .status(400)
                     .send(craftRequest(400, { status: "invalid password" }));
                 }
-<<<<<<< HEAD
-
-                    } else {
-                        res.status(400).send(craftRequest(400));
-                    }
-                })
-
-
-                
-               
-=======
               } else {
                 res.status(400).send(craftRequest(400, { status: "invalid code" }));
               }
             } else {
               res.status(400).send(craftRequest(400));
->>>>>>> 1e2a2f100a5703208071912a995381020f84f175
             }
           });
         } else {
@@ -1986,7 +1871,12 @@ app.post("/sendSecurity", (req, res) => {
                   md5(email.toLowerCase()),
                   process.env.DYNAMO_FOURTH
                 ).then(async ({ query }) => {
+
+                    const user = query[0]
                   if (query !== null && query.length > 0) {
+
+
+
                     console.log("query", query);
                     const html = `<!DOCTYPE html>
         <html lang="en">
@@ -2010,8 +1900,8 @@ app.post("/sendSecurity", (req, res) => {
                 <div style="text-align:center; margin:30px 0;">
                   <a href="${
                     process.env.NODE_ENV
-                      ? "http://localhost:5173/createSecurity/" + query.uuid
-                      : "https://ticketnest.us/createSecurity/" + query.uuid
+                      ? "http://localhost:5173/createSecurity/" + user.uuid
+                      : "https://ticketnest.us/createSecurity/" + user.uuid
                   }" style="background-color:#4CAF50; color:#ffffff; padding:14px 24px; text-decoration:none; font-size:16px; border-radius:5px; display:inline-block;">
                     Finish Creating Account
                   </a>
