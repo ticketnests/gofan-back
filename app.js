@@ -1042,106 +1042,116 @@ app.post("/create-checkout-session", (req, res) => {
         const { items, eventId, startDate, endDate, name, school, schoolId } =
           req.body;
 
-        if (Array.isArray(items)) {
-          let totalAmt = 0;
-          for (let i = 0; i < items.length; i++) {
-            totalAmt += Number(items[i].amountOfTickets) || 0;
-          }
 
-          if (totalAmt > process.env.MAX_TICKETS) {
-            res.status(400).send(craftRequest(400));
-            return;
-          }
+        locateEntry("uuid", id).then(async(user) => {
+            if (user!==null) {
+                if (Array.isArray(items)) {
+                    let totalAmt = 0;
+                    for (let i = 0; i < items.length; i++) {
+                      totalAmt += Number(items[i].amountOfTickets) || 0;
+                    }
+          
+                    if (totalAmt > process.env.MAX_TICKETS) {
+                      res.status(400).send(craftRequest(400));
+                      return;
+                    }
+          
+                    if (
+                      items != undefined &&
+                      schoolId !== undefined &&
+                      schoolId !== null &&
+                      schoolId.length < 1000 &&
+                      items != null &&
+                      items.length > 0 &&
+                      eventId != undefined &&
+                      eventId != null &&
+                      eventId.length > 0 &&
+                      isNumber(startDate) &&
+                      isNumber(endDate) &&
+                      isString(name, 100) &&
+                      isString(school, 100)
+                    ) {
+                      // {
+                      //     // Provide the exact Price ID (for example, pr_1234) of the product you want to sell
+                      //     price: '{{PRICE_ID}}',
+                      //     quantity: 1,
+                      //   },
+          
+                      console.log("this is the items: ", items);
+                      const lineItems = items.map((item) => {
+                        if (item.amountOfTickets > 0) {
+                          return {
+                            quantity:
+                              item.amountOfTickets === "" ? 0 : item.amountOfTickets,
+                            price: item.priceId,
+                          };
+                        }
+                      });
+                      const formattedTickets = [];
+                      items.forEach((item) => {
+                        // this is the items:  [
+                        //     {
+                        //       name: 'Adult Ticket',
+                        //       price: '10.00',
+                        //       amountOfTickets: '3',
+                        //       priceId: 'price_1RHu84QGW3QLsR8r1m8TZdE3'
+                        //     }
+                        for (let i = 0; i < Number(item.amountOfTickets); i++) {
+                          formattedTickets.push({
+                            name: item.name,
+                            price: Number(item.price),
+                          });
+                        }
+                      });
+          
+                      console.log(lineItems);
+                      // uuid: user.uuid,
+                      // isActive: true,
+                      // eventId: metaData.eventId,
+                      // startDate: cmod.encrypt(metaData.startDate),
+                      // endDate: cmod.encrypt(metaData.endDate),
+                      // name: cmod.encrypt(metaData.name),
+                      // school: cmod.encrypt(metaData.school),
+                      const session = await stripe.checkout.sessions.create({
+                        line_items: lineItems,
+                        mode: "payment",
+                        payment_intent_data: {
+                          metadata: {
+                            uuid: id,
+                            eventId: eventId,
+                            startDate: startDate,
+                            endDate: endDate,
+                            name: name,
+                            school: school,
+                            schoolId: schoolId,
+                            allBought: JSON.stringify(formattedTickets),
+                          },
+                        },
+                        success_url:
+                          process.env.NODE_ENV === "DEV"
+                            ? "http://localhost:5173/dashboard"
+                            : "https://ticketnest.us/dashboard",
+                        cancel_url:
+                          process.env.NODE_ENV === "DEV"
+                            ? "http://localhost:5173/dashboard"
+                            : "https://ticketnest.us/dashboard",
+                      });
+                      console.log("Session: ", session);
+                      console.log("Session: ", session.url);
+                      res.status(200).send(craftRequest(200, { url: session.url }));
+                    } else {
+                      res.status(400).send(craftRequest(400));
+                    }
+                  } else {
+                    res.status(400).send(craftRequest(400));
+                  }
 
-          if (
-            items != undefined &&
-            schoolId !== undefined &&
-            schoolId !== null &&
-            schoolId.length < 1000 &&
-            items != null &&
-            items.length > 0 &&
-            eventId != undefined &&
-            eventId != null &&
-            eventId.length > 0 &&
-            isNumber(startDate) &&
-            isNumber(endDate) &&
-            isString(name, 100) &&
-            isString(school, 100)
-          ) {
-            // {
-            //     // Provide the exact Price ID (for example, pr_1234) of the product you want to sell
-            //     price: '{{PRICE_ID}}',
-            //     quantity: 1,
-            //   },
+            } else {
+                res.status(400).send(craftRequest(400));
+            }
+        })
 
-            console.log("this is the items: ", items);
-            const lineItems = items.map((item) => {
-              if (item.amountOfTickets > 0) {
-                return {
-                  quantity:
-                    item.amountOfTickets === "" ? 0 : item.amountOfTickets,
-                  price: item.priceId,
-                };
-              }
-            });
-            const formattedTickets = [];
-            items.forEach((item) => {
-              // this is the items:  [
-              //     {
-              //       name: 'Adult Ticket',
-              //       price: '10.00',
-              //       amountOfTickets: '3',
-              //       priceId: 'price_1RHu84QGW3QLsR8r1m8TZdE3'
-              //     }
-              for (let i = 0; i < Number(item.amountOfTickets); i++) {
-                formattedTickets.push({
-                  name: item.name,
-                  price: Number(item.price),
-                });
-              }
-            });
-
-            console.log(lineItems);
-            // uuid: user.uuid,
-            // isActive: true,
-            // eventId: metaData.eventId,
-            // startDate: cmod.encrypt(metaData.startDate),
-            // endDate: cmod.encrypt(metaData.endDate),
-            // name: cmod.encrypt(metaData.name),
-            // school: cmod.encrypt(metaData.school),
-            const session = await stripe.checkout.sessions.create({
-              line_items: lineItems,
-              mode: "payment",
-              payment_intent_data: {
-                metadata: {
-                  uuid: id,
-                  eventId: eventId,
-                  startDate: startDate,
-                  endDate: endDate,
-                  name: name,
-                  school: school,
-                  schoolId: schoolId,
-                  allBought: JSON.stringify(formattedTickets),
-                },
-              },
-              success_url:
-                process.env.NODE_ENV === "DEV"
-                  ? "http://localhost:5173/dashboard"
-                  : "https://ticketnest.us/dashboard",
-              cancel_url:
-                process.env.NODE_ENV === "DEV"
-                  ? "http://localhost:5173/dashboard"
-                  : "https://ticketnest.us/dashboard",
-            });
-            console.log("Session: ", session);
-            console.log("Session: ", session.url);
-            res.status(200).send(craftRequest(200, { url: session.url }));
-          } else {
-            res.status(400).send(craftRequest(400));
-          }
-        } else {
-          res.status(400).send(craftRequest(400));
-        }
+        
       }
     });
   } catch (e) {
@@ -1162,7 +1172,7 @@ app.post("/getGame", (req, res) => {
 
             for (let i = 0; i < school.events.length || 0; i++) {
               console.log(school.events[i].id === gameId);
-              if (school.events[i].id === gameId) {
+              if ((school.events[i].id === gameId) && (school.events[i].isActive)) {
                 game = school.events[i];
                 break;
               }
@@ -2247,6 +2257,20 @@ app.get("/getFinancialsGraph", (req,res) => {
 })
 
 
+
+
+app.get("/eventSearch", (req,res) => {
+
+    try {
+
+    } catch(e) {
+        console.log(e);
+        reportError(e);
+        res.status(400).send(craftRequest(400));
+    }
+
+
+})
 
 
 
