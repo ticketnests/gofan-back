@@ -97,7 +97,7 @@ function isString(s, lengthLimit = 1000000) {
   //         return false;
   //     }
 
-  if (string != undefined && string != null && string.length < lengthLimit) {
+  if (s !== undefined && s !== null && string.length < lengthLimit) {
     return true;
   } else {
     return false;

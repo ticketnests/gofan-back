@@ -752,58 +752,105 @@ app.post("/createSchool", (req, res) => {
 
   // email
   try {
-    const { email, name, schoolAddress, password } = req.body;
+    const { email, name, schoolParent, schoolAddress, password, categoryId} = req.body;
 
-    if (isEmail(email) && isString(name, 30) && schoolAddress.length < 1000) {
+    if (isEmail(email) && isString(name, 30) && schoolAddress.length < 1000 && isString(schoolParent, 100) && isPassword(password) && isString(categoryId, 100)) {
       locateEntry("emailHash", md5(email), process.env.DYNAMO_SECONDARY).then(
         ({ query }) => {
           const users = query;
           if (users.length === 0) {
-            bcrypt.hash(password, saltRounds, function (err, hash) {
-              if (err) {
-                console.log(err);
-                res.status(400).send(craftRequest(400));
-              } else {
-                if (hash !== null) {
-                  const uuid = v4();
-                  const newSchool = {
-                    uuid: uuid,
-                    schoolName: "x",
-                    password: hash,
-                    emailHash: md5(email),
-                    email: cmod.encrypt(email),
-                    schoolAddress: cmod.encrypt(schoolAddress),
-                    name: cmod.encrypt(name),
-                  };
 
-                  addEntry(newSchool, process.env.DYNAMO_SECONDARY).then(
-                    (x) => {
-                      addEntry(
-                        {
-                          uuid: "SCHOOLNAMES",
-                          schoolName: name.toLowerCase(),
-                          id: uuid,
-                        },
-                        process.env.DYNAMO_SECONDARY
-                      ).then(() => {
-                        setCookie(req, uuid);
-                        res.status(200).send(craftRequest(200));
-                      });
+            locateEntry("uuid", "SCHOOLNAMES", process.env.DYNAMO_SECONDARY, false, "schoolName", schoolParent.toLowerCase().trim()).then((school) => {
+                if (school !== null) {
+
+                    if (school.categoryId === categoryId) {
+                        bcrypt.hash(password, saltRounds, function (err, hash) {
+                            if (err) {
+                              console.log(err);
+                              res.status(400).send(craftRequest(400));
+                            } else {
+                              if (hash !== null) {
+                                const uuid = v4();
+                                const newSchool = {
+                                  uuid: uuid,
+                                  schoolName: "x",
+                                  password: hash,
+                                  emailHash: md5(email),
+                                  email: cmod.encrypt(email),
+                                  schoolAddress: cmod.encrypt(schoolAddress),
+                                  schoolParent: cmod.encrypt(schoolParent.toLowerCase().trim()),
+                                  name: cmod.encrypt(name),
+                                };
+              
+                                addEntry(newSchool, process.env.DYNAMO_SECONDARY).then(
+                                  (x) => {
+                                    
+
+                                    const prevSchools = school.allOrganizations || [];
+
+                                    prevSchools.push(uuid);
+                                    updateEntry("uuid", "SCHOOLNAMES", { allOrganizations: prevSchools}, process.env.DYNAMO_SECONDARY, "schoolName", schoolParent.toLowerCase().trim()).then(() => {
+                                        setCookie(req, uuid);
+                                        res.status(200).send(craftRequest(200));
+            
+                                    })
+              
+                                    
+              
+              
+              
+                                  //   addEntry(
+                                  //     {
+                                  //       uuid: "SCHOOLNAMES",
+                                  //       schoolName: name.toLowerCase(),
+                                  //       id: uuid,
+                                  //     },
+                                  //     process.env.DYNAMO_SECONDARY
+                                  //   ).then(() => {
+                                  //     setCookie(req, uuid);
+                                  //     res.status(200).send(craftRequest(200));
+                                  //   });
+                                  }
+                                );
+                              } else {
+                                res.status(400).send(craftRequest(400));
+                              }
+                            }
+              
+                            // Store hash in your password DB.
+                          });
+
+
+
+                       
+
+
+                    } else {
+                        res.status(400).send(craftRequest(400, { status: "Invalid categoryId" }));
                     }
-                  );
-                } else {
-                  res.status(400).send(craftRequest(400));
-                }
-              }
+                    
 
-              // Store hash in your password DB.
-            });
+
+
+
+                } else {
+                    res.status(400).send(craftRequest(400));
+                }
+
+
+            })
+
+
+
+            
           } else {
+            console.log("this is the user", users[0]);
             res.status(400).send(craftRequest(400));
           }
         }
       );
     } else {
+    
       res.status(400).send(craftRequest(400));
     }
   } catch (e) {
@@ -812,6 +859,106 @@ app.post("/createSchool", (req, res) => {
     res.status(400).send(craftRequest(400));
   }
 });
+
+
+
+app.get("/getOrganization", (req,res ) => {
+    try {
+        const { uuid } = req.query;
+
+
+        if (isString(uuid, 100) && uuid != undefined) {
+            console.log("this is the uuid", uuid);
+            locateEntry("categoryId", uuid, process.env.DYNAMO_SECONDARY).then(async({query}) => {
+                
+                if (query.length > 0) {
+                    const organization = query[0];
+
+
+                    const allSchools = organization.allOrganizations;
+                    
+                    console.log("this is the organization", organization);
+                    const data = {
+                        address: "123 Elmo Street",
+                        name: formatString(organization.schoolName),
+                        allClubs: [],
+                    }
+
+
+                    for (let i=0; i<allSchools.length; i++) {
+                        const currentId = allSchools[i];
+                        
+                        await locateEntry('uuid', currentId, process.env.DYNAMO_SECONDARY).then((school) => {
+                            if (school !== null) {
+                                
+                                if (data.address === "123 Elmo Street") {
+                                    data.address = cmod.decrypt(school.schoolAddress);
+                                } 
+
+                                const prevClubs = data.allClubs;
+
+                                prevClubs.push({
+                                    id: school.uuid,
+                                    name: formatString(cmod.decrypt(school.name)),
+                                })
+
+
+
+
+                            } else {
+
+                                res.status(400).send(craftRequest(400));
+                            }
+
+
+                        })
+
+                    
+
+
+
+
+
+
+
+
+                    }
+
+
+                    res.status(200).send(craftRequest(200, data));
+
+                    
+
+
+
+
+
+                     
+                } else {
+                    res.status(400).send(craftRequest(400));
+
+                }
+
+
+            })
+
+        }
+
+
+
+
+
+    } catch(e) {
+        console.log(e);
+        reportError(e);
+        res.status(400).send(craftRequest(400));
+    }
+
+
+})
+
+
+
 
 app.post("/getSchool", (req, res) => {
   try {
@@ -897,7 +1044,7 @@ app.post("/createEvent", (req, res) => {
         res.status(403).send(craftRequest(403));
       } else {
         const {
-          date,
+      
           type,
           startDate,
           endDate,
@@ -906,7 +1053,7 @@ app.post("/createEvent", (req, res) => {
           description,
           isActive,
         } = req.body;
-        console.log("isString(date, 10):", isString(date, 10));
+
         console.log("isNumber(startDate):", isNumber(startDate));
         console.log("isNumber(endDate):", isNumber(endDate));
         console.log("isString(name):", isString(name));
@@ -915,7 +1062,6 @@ app.post("/createEvent", (req, res) => {
         console.log("options.length !== 0:", options.length !== 0);
 
         if (
-          isString(date, 10) &&
           description &&
           description.length > 0 &&
           (isActive === true || isActive === false) &&
@@ -1032,6 +1178,10 @@ app.post("/createEvent", (req, res) => {
     res.status(400).send(craftRequest(400));
   }
 });
+
+
+
+
 
 app.post("/create-checkout-session", (req, res) => {
   try {
@@ -1685,6 +1835,44 @@ app.post("/updateEvent", (req, res) => {
   }
 });
 
+app.post("/createCategory", (req,res) => {
+    try {
+        const { category } = req.body;
+        if (category !== null && category !== undefined && isString(category, 100)) {
+                console.log("this occured #1");
+          
+                    locateEntry("uuid", "SCHOOLNAMES", process.env.DYNAMO_SECONDARY, false, "schoolName", category.toLowerCase().trim()).then(
+                        (school) => {
+                            if (school !== null) {
+                                res.status(200).send(craftRequest(200, "this already exists"));
+                            } else {
+                                addEntry({uuid: "SCHOOLNAMES", schoolName: category.toLowerCase().trim(), allOrganizations: [], categoryId: v4() }, process.env.DYNAMO_SECONDARY).then(() => {
+                                    res.status(200).send(craftRequest(200));
+                                })
+                            }
+                        }
+                    );
+                
+         
+        } else {
+            console.log("this occured #2");
+            res.status(400).send(craftRequest(400));
+        }
+    } catch(e) {
+        console.log(e);
+        reportError(e);
+        res.status(400).send(craftRequest(400));
+    }
+})
+
+
+
+
+
+
+
+
+
 app.post("/schoolSearch", (req, res) => {
   try {
     const { query } = req.body;
@@ -2262,6 +2450,33 @@ app.get("/getFinancialsGraph", (req,res) => {
 app.get("/eventSearch", (req,res) => {
 
     try {
+
+        authenticateUser(req).then((id) => {
+            if (id === "No user found") {
+                res.status(400).send(craftRequest(400));
+            } else {
+                locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then((school) => {
+                    if (school !== null) {
+                        const events = school.events || [];
+                        const {query} = req.query;
+                        const filteredEvents = events.filter((event) => {
+
+                            
+                            return cmod.decrypt(event.name).toLowerCase().includes(query.toLowerCase())
+                        })
+                        res.status(200).send(craftRequest(200, filteredEvents));
+                    } else {
+                        res.status(400).send(craftRequest(400));
+                    }
+
+
+                })
+
+            }
+
+
+        })
+
 
     } catch(e) {
         console.log(e);
