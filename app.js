@@ -1866,6 +1866,9 @@ app.post("/createCategory", (req,res) => {
 })
 
 
+app.get("/sitemap", async(req,res) => {
+    res.sendFile(__dirname + "/sitemap.xml")
+})
 
 
 
