@@ -2102,7 +2102,7 @@ app.post("/sendSecurity", (req, res) => {
                 </p>
                 <div style="text-align:center; margin:30px 0;">
                   <a href="${
-                    process.env.NODE_ENV
+                    process.env.NODE_ENV==="DEV"
                       ? "http://localhost:5173/createSecurity/" + user.uuid
                       : "https://ticketnest.us/createSecurity/" + user.uuid
                   }" style="background-color:#4CAF50; color:#ffffff; padding:14px 24px; text-decoration:none; font-size:16px; border-radius:5px; display:inline-block;">
@@ -2156,7 +2156,7 @@ app.post("/sendSecurity", (req, res) => {
                 </p>
                 <div style="text-align:center; margin:30px 0;">
                   <a href="${
-                    process.env.NODE_ENV
+                    process.env.NODE_ENV==="DEV"
                       ? "http://localhost:5173/createSecurity/" + uuid
                       : "https://ticketnest.us/createSecurity/" + uuid
                   }" style="background-color:#4CAF50; color:#ffffff; padding:14px 24px; text-decoration:none; font-size:16px; border-radius:5px; display:inline-block;">
@@ -2258,6 +2258,7 @@ app.get("/getSecurity", (req, res) => {
         try {
           locateEntry("schoolId", id, process.env.DYNAMO_FOURTH).then(
             ({ query }) => {
+              // console.log("This is the query", query)
               const allSecurity = query;
 
               res.status(200).send(
