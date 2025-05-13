@@ -37,9 +37,10 @@ const {
   updateEntry,
   searchEntry,
   removeEntry,
+  searchBySortKey
 } = require("./databaseFunctions.js");
 const MemoryStore = require("memorystore")(session);
-
+const { CronJob } = require('cron');
 const bcrypt = require("bcrypt");
 
 const Cryptr = require("cryptr");
@@ -97,6 +98,58 @@ app.use(
     }),
   })
 );
+
+
+// I haven't checked this code yet.
+const doMidnightTasks = async () => {
+  // I need to invalidate every single entry
+
+  console.log("Doing midnight tasks");
+  const schools = await searchBySortKey("schoolName", "x", process.env.DYNAMO_SECONDARY);
+
+  // Process each school sequentially
+  for (const school of schools) {
+    // Checking every single event;
+    const originalEvents = school.events || [];
+
+    for (let i = 0; i < originalEvents.length; i++) {
+      const currentEvent = originalEvents[i];
+
+      if (currentEvent.isActive) {
+
+        if (Number(cmod.decrypt(currentEvent.endDate)) < Date.now()) {
+          originalEvents[i].isActive = false;
+          console.log("it toggled the if statement")
+        } else {
+          console.log(Date.now());
+          console.log(Number(cmod.decrypt(currentEvent.startDate)));
+          console.log(cmod.decrypt(currentEvent.name) + " didn't trigger it")
+          console.log("didnt trigger it")
+        }
+      }
+    }
+
+    // Only update if changes were made
+    if (JSON.stringify(originalEvents) !== JSON.stringify(school.events)) {
+      await updateEntry("uuid", school.uuid, { events: originalEvents }, process.env.DYNAMO_SECONDARY);
+    }
+  }
+
+  console.log("This was completed successfully");
+};
+
+
+// doMidnightTasks();
+
+
+const job = CronJob.from({
+	cronTime: '0 0 0 * * *',
+	onTick: doMidnightTasks,
+	start: true,
+})
+
+
+
 
 app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
   const sig = req.headers["stripe-signature"];
@@ -764,13 +817,35 @@ app.post("/createSchool", (req, res) => {
                 if (school !== null) {
 
                     if (school.categoryId === categoryId) {
-                        bcrypt.hash(password, saltRounds, function (err, hash) {
+                        bcrypt.hash(password, saltRounds, async function (err, hash) {
                             if (err) {
                               console.log(err);
                               res.status(400).send(craftRequest(400));
                             } else {
                               if (hash !== null) {
                                 const uuid = v4();
+
+                                const account = await stripe.accounts.create({
+                                  country: "US",
+                                  email: email.trim(),
+                                  controller: {
+                                    fees: {
+                                      payer: "application"
+                                    }, 
+                                    losses: {
+                                      payments: 'application'
+                                    }, 
+                                    stripe_dashboard: {
+                                      type: "express"
+                                    }
+                                  }
+                                })
+
+                                console.log(account);
+
+
+
+
                                 const newSchool = {
                                   uuid: uuid,
                                   schoolName: "x",
@@ -905,10 +980,7 @@ app.get("/getOrganization", (req,res ) => {
 
 
 
-                            } else {
-
-                                res.status(400).send(craftRequest(400));
-                            }
+                            } 
 
 
                         })
@@ -925,7 +997,13 @@ app.get("/getOrganization", (req,res ) => {
                     }
 
 
-                    res.status(200).send(craftRequest(200, data));
+
+                    if (data.address !== "123 Elmo Street") {
+                      res.status(200).send(craftRequest(200, data));
+                    } else {
+                      res.status(400).send(craftRequest(400));
+                    }
+                    
 
                     
 
@@ -2361,13 +2439,14 @@ app.get("/getFinancialsGraph", (req,res) => {
                             for (let i=0; i<events.length; i++) {
                                 const currEvent = events[i];
                                 const currId = events[i].id;
-                                console.log("this is the first event being tried")
+                                // console.log("this is the first event being tried")
 
                                 if (Math.abs(Date.now()-cmod.decrypt(currEvent.startDate)) < Number(timeInterval)*24*60*60*1000) {
                                     await locateEntry("eventId", currId, process.env.DYNAMO_THIRD).then(({query}) => {
                                         console.log("first batch of tickets being logged", query);
                                         const tickets = query;
                                         tickets.forEach((ticket) => {
+                                          console.timeLog("this is the ticket", ticket)
                                             const ticketDate = new Date(ticket.dateBought).toLocaleDateString("en-US", {
                                                 year: "numeric",
                                                 month: "2-digit",
@@ -2490,6 +2569,8 @@ app.get("/eventSearch", (req,res) => {
 
 
 })
+
+
 
 
 

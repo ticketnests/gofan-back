@@ -13,6 +13,46 @@ async function addEntry(entry, tableName=process.env.DYNAMO_NAME) {
     }))
     return true;
 }
+
+
+/**
+ * Search DynamoDB by sort key only (scan with filter).
+ * WARNING: Scans are expensive and slow on large tables.
+ * @param {string} sortKeyName - The name of the sort key attribute.
+ * @param {string} sortKeyValue - The value to search for.
+ * @param {string} tableName - DynamoDB table name.
+ * @returns {Promise<Array>} - Array of matching items.
+ */
+async function searchBySortKey(sortKeyName, sortKeyValue, tableName = process.env.DYNAMO_NAME) {
+    const params = {
+        TableName: tableName,
+        FilterExpression: "#sk = :skVal",
+        ExpressionAttributeNames: {
+            "#sk": sortKeyName
+        },
+        ExpressionAttributeValues: {
+            ":skVal": sortKeyValue
+        }
+    };
+
+    let items = [];
+    let lastEvaluatedKey = undefined;
+
+    do {
+        if (lastEvaluatedKey) {
+            params.ExclusiveStartKey = lastEvaluatedKey;
+        }
+        const response = await documentClient.send(new ScanCommand(params));
+        if (response.Items) {
+            items = items.concat(response.Items);
+        }
+        lastEvaluatedKey = response.LastEvaluatedKey;
+    } while (lastEvaluatedKey);
+
+    return items;
+}
+
+
 async function removeEntry(keyName, key, tableName=process.env.DYNAMO_NAME, sortName="schoolName", sortValue="x") {
     const keys = {
         [keyName]: key,
@@ -196,7 +236,7 @@ async function searchEntry(keyName, keyValue, sortName, sortValue, tableName) {
 
 
 
-module.exports = {locateEntry, removeEntry, addEntry,updateEntry, searchEntry}
+module.exports = {locateEntry, removeEntry, addEntry,updateEntry, searchEntry, searchBySortKey}
 
 
 
