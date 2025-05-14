@@ -19,6 +19,7 @@ const {
   generateCode,
   formatString,
   reportError,
+  calculateTransfer
 } = require("./functions.js");
 const express = require("express");
 const http = require("http");
@@ -48,6 +49,7 @@ const Cryptr = require("cryptr");
 // const { start } = require('repl');
 
 const QRCode = require("qrcode");
+const { report } = require("process");
 // const { report } = require('process');
 // const { createTracing } = require('trace_events');
 
@@ -163,6 +165,11 @@ app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
     event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
 
     switch (event.type) {
+
+
+      // We need to add a case of what happens when the credit card declines. 
+
+
       case "payment_intent.succeeded":
         const paymentIntentSucceeded = event.data.object;
         console.log("Checkout Completed: ", paymentIntentSucceeded);
@@ -235,11 +242,30 @@ app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
                     updateEntry(
                       "uuid",
                       metaData.schoolId,
-                      { events: updatedEvents },
+                      { events: updatedEvents, amountAvailable: Number(school.amountAvailable + calculateTransfer(totalAmountGenerated, JSON.parse(metaData.allBought).length)) + Number(totalAmountGenerated) },
                       process.env.DYNAMO_SECONDARY
-                    ).then(() => {
-                      console.log("all is well", updatedEvents);
-                      res.status(200).send(craftRequest(200));
+                    ).then(async() => {
+                      try {
+                        const transfer = await stripe.transfers.create({
+                          amount: calculateTransfer(totalAmountGenerated, JSON.parse(metaData.allBought).length)*100,
+                          currency: "usd",
+                          destination: school.stripeId
+        
+                        })
+                        console.log("all is well", updatedEvents);
+                        res.status(200).send(craftRequest(200));
+                      } catch(e) {
+                        console.log(e);
+                        reportError(e);
+                        res.status(400).send(craftRequest(400, e))
+                      
+                      
+                      }
+                      
+
+
+
+                      
                     });
                   }
                 });
@@ -274,6 +300,80 @@ app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
         // Then define and call a function to handle the event checkout.session.completed
         break;
       // ... handle other event types
+
+
+      case "account.updated":
+        console.log("Account updated: ");
+        
+        if (event.data.object.id) {
+
+          console.log("Updated account ID:", event.account);
+          const id = event.data.object.id;
+          // Check that this works here
+          if (event.data.object["details_submitted"]) {
+            updateEntry("stripeId", id, { hasVerified: true }, process.env.DYNAMO_SECONDARY).then(() => {
+
+              res.status(200).send(craftRequest(200));
+            })
+  
+          } else {
+    
+            updateEntry("stripeId", id, { hasVerified: false }, process.env.DYNAMO_SECONDARY).then(() => {
+
+              res.status(200).send(craftRequest(200));
+            })
+          }
+         
+
+
+
+        } else {
+          res.status(400).send(craftRequest(400));
+        }
+
+
+      case "payout.paid": 
+
+      // This code hasn't been tested at all
+        if (event?.account) {
+          const id = event?.account;
+          const paidOutObject = event.data.object;
+          // const
+          console.log(event)
+          locateEntry("stripeId", id, process.env.DYNAMO_SECONDARY).then((user) => {
+            if (user!==null) {
+
+              updateEntry("uuid", user.uuid, {
+                lastWithdraw: Date.now(),
+                amountAvailable: user.amountAvailable - paidOutObject.amount
+              })
+
+
+
+
+
+
+            } else {
+              res.status(400).send(craftRequest(400));
+            }
+          })
+
+          
+
+
+          
+        } else {
+          res.status(400).send(event);
+        }
+        
+
+
+        
+
+
+        // res.status(200).send(craftRequest(200));
+
+
       default:
         console.log(`Unhandled event type ${event.type}`);
         res.status(400).send(craftRequest(400));
@@ -555,6 +655,7 @@ app.get("/getUser", (req, res) => {
 
               const currentUser = {
                 isAdmin: true,
+                hasVerified: user.hasVerified,
                 events: eventList,
                 uuid: user.uuid,
                 email: cmod.decrypt(user.email),
@@ -841,12 +942,23 @@ app.post("/createSchool", (req, res) => {
                                   }
                                 })
 
+                                await stripe.accounts.update(account.id, {
+
+                                  tos_acceptance: {
+                                    service_agreement: "full",
+
+                                  }
+                                })
+
+
                                 console.log(account);
 
 
 
 
                                 const newSchool = {
+                                  stripeId: account.id,
+                                  hasVerified: false,
                                   uuid: uuid,
                                   schoolName: "x",
                                   password: hash,
@@ -855,6 +967,9 @@ app.post("/createSchool", (req, res) => {
                                   schoolAddress: cmod.encrypt(schoolAddress),
                                   schoolParent: cmod.encrypt(schoolParent.toLowerCase().trim()),
                                   name: cmod.encrypt(name),
+                                  amountAvailable: 0,
+                                  // ticketsUsed: 0,
+                                  lastWithdraw: null,
                                 };
               
                                 addEntry(newSchool, process.env.DYNAMO_SECONDARY).then(
@@ -935,6 +1050,53 @@ app.post("/createSchool", (req, res) => {
   }
 });
 
+
+app.get("/createConnectLink", (req,res) => {
+  try {
+    authenticateUser(req).then((id) => {
+      locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then(async(user) => {
+        if (user!==null) {
+          const accountLink = await stripe.accountLinks.create({
+            account: user.stripeId,
+            refresh_url: (process.env.NODE_ENV==="DEV" ? "http://localhost:5173" : process.env.PROD_URL) + "/settings",
+            return_url: (process.env.NODE_ENV==="DEV" ? "http://localhost:5173" : process.env.PROD_URL)  + "/dashboard",
+            type: "account_onboarding",
+
+
+          })
+          console.log(accountLink)
+
+          res.status(200).send(craftRequest(200, { url: accountLink.url }));
+          
+
+
+
+
+
+        } else {
+          res.status(400).send(craftRequest(400));  
+        }
+
+
+      })
+
+
+    })
+
+
+
+
+  } catch(e) {
+    
+
+    console.log(e);
+    reportError(e);
+    res.status(400).send(craftRequest(400));
+  
+  }
+
+
+})
 
 
 app.get("/getOrganization", (req,res ) => {
@@ -1944,6 +2106,91 @@ app.post("/createCategory", (req,res) => {
 })
 
 
+// app.get("/payout", (req,res) => {
+//   try {
+//     authenticateUser(req).then((id) => {
+//       if (id === "No user found") {
+//         res.status(403).send(craftRequest(403));
+//       } else {
+
+//         locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then(async(school) => {
+//           if (school !== null) {
+            
+
+            
+
+//             if ((school.lastWithdraw===null||(Math.abs(Number(school.lastWithdraw) - Date.now()) > 1000*60*60*24*5))&&(school.amountAvailable>20)) {
+
+//                 // Do the payout 
+//                 // const transferAmount = calculateTransfer(school.amountAvailable, school.ticketsUsed)
+
+//               try {
+                
+//                 const payout = await stripe.payouts.create({
+//                   amount: school.amountAvailable*100,
+//                   currency: "usd",
+//                   destination: school.stripeId
+//                 })
+                
+
+
+//                 updateEntry("uuid", id, {amountAvailable: 0, ticketsUsed: 0, lastWithdraw: Date.now()}, process.env.DYNAMO_SECONDARY).then(() => {
+//                   res.status(200).send(craftRequest(200));
+                
+//                 })
+
+                
+
+//               } catch(e) {
+//                 console.log(e);
+//                 res.status(400).send(craftRequest(400, "Your payout was invalid"))
+//               }
+                
+
+//             } else if (Math.abs(Number(school.lastWithdraw) - Date.now()) < 1000*60*60*24*5) {
+//               res.status(400).send(craftRequest(400, "Too early to request another payout"))
+//             } else if (school.amountAvailable<20) {
+//               res.status(400).send(craftRequest(400, "Need at least $20.00 to request payout"))
+//             }
+//             else {
+//               console.log("did this happen")
+//               res.status(400).send(craftRequest(400))
+
+//             }
+
+
+
+
+//           } else {
+            
+
+//             res.status(400).send(craftRequest(400));
+
+
+//           }
+
+//         })
+
+
+
+//       }
+//     })
+
+
+//   } catch(e) {
+//     console.log(e);
+//     reportError(e);
+
+
+//     res.status(400).send(craftRequest(400));
+
+
+//   }
+
+
+// })
+
+
 app.get("/sitemap", async(req,res) => {
     res.sendFile(__dirname + "/sitemap.xml")
 })
@@ -1992,6 +2239,8 @@ app.get("/getFinancials", (req, res) => {
           const body = {
             totalRevenue: 0,
             ticketsSold: 0,
+            amountAvailable: school.amountAvailable,
+            lastWithdraw: school.lastWithdraw,
           };
           if (school.events !== null) {
             console.log("SCHOOL EVENTS", school.events);

@@ -169,6 +169,12 @@ function formatString(string) {
     .join(" ");
 }
 
+
+
+function calculateTransfer(totalRevenue, ticketsSold) {
+  return Number(totalRevenue) - (Number(ticketsSold) * 0.2)
+}
+
 module.exports = {
   authenticateUser,
   isNumber,
@@ -181,4 +187,5 @@ module.exports = {
   setCookie,
   generateCode,
   formatString,
+  calculateTransfer
 };
