@@ -67,7 +67,7 @@ const SCHEMA = ["name", "email", "password"];
 if (process.env.NODE_ENV === "DEV") {
   app.use(
     cors({
-      origin: "http://localhost:3000",
+      origin: "http://localhost:5173",
       methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
       credentials: true,
     })
@@ -100,6 +100,12 @@ app.use(
     }),
   })
 );
+
+
+
+
+
+
 
 
 // I haven't checked this code yet.
