@@ -303,26 +303,41 @@ app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
 
 
       case "account.updated":
-        console.log("Account updated: ");
+        console.log("Account updated: ", event);
         
-        if (event.data.object.id) {
+        if (typeof event?.account === "string") {
 
           console.log("Updated account ID:", event.account);
-          const id = event.data.object.id;
+          const id = event.account;
           // Check that this works here
-          if (event.data.object["details_submitted"]) {
-            updateEntry("stripeId", id, { hasVerified: true }, process.env.DYNAMO_SECONDARY).then(() => {
 
-              res.status(200).send(craftRequest(200));
-            })
-  
-          } else {
+          locateEntry("stripeId", id, process.env.DYNAMO_SECONDARY).then(({query}) => {
+            const list = query;
+            if (list.length>0) {
+              const school = list[0];
+              console.log(event.data.object["payouts_enabled"])
+              if (event.data.object["payouts_enabled"]) {
+                
+                updateEntry("uuid", school.uuid, { hasVerified: true }, process.env.DYNAMO_SECONDARY).then(() => {
     
-            updateEntry("stripeId", id, { hasVerified: false }, process.env.DYNAMO_SECONDARY).then(() => {
+                  res.status(200).send(craftRequest(200));
+                })
+              } else {
+                updateEntry("uuid", school.uuid, { hasVerified: false }, process.env.DYNAMO_SECONDARY).then(() => {
+    
+                  res.status(200).send(craftRequest(200));
+                })
+              }
 
-              res.status(200).send(craftRequest(200));
-            })
-          }
+
+            } else {
+
+
+              res.status(400).send(craftRequest(400, "how tf did this happen"));
+            }
+
+          })
+       
          
 
 
@@ -330,43 +345,33 @@ app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
         } else {
           res.status(400).send(craftRequest(400));
         }
+        break;
 
 
       case "payout.paid": 
 
       // This code hasn't been tested at all
-        if (event?.account) {
-          const id = event?.account;
+        if (event.account) {
+          const id = event.account;
           const paidOutObject = event.data.object;
-          // const
-          console.log(event)
-          locateEntry("stripeId", id, process.env.DYNAMO_SECONDARY).then((user) => {
-            if (user!==null) {
-
+          console.log(event);
+          locateEntry("stripeId", id, process.env.DYNAMO_SECONDARY).then(({ query }) => {
+            const users = query;
+            if (users && users.length > 0) {
+              const user = users[0];
               updateEntry("uuid", user.uuid, {
                 lastWithdraw: Date.now(),
-                amountAvailable: user.amountAvailable - paidOutObject.amount
-              })
-
-
-
-
-
-
+                amountAvailable: (Number(user.amountAvailable) - Number(paidOutObject.amount) / 100).toFixed(2)
+              });
             } else {
               res.status(400).send(craftRequest(400));
             }
-          })
-
-          
-
-
-          
+          });
         } else {
-          res.status(400).send(event);
+          res.status(400).send(craftRequest(400, event));
         }
         
-
+        break;
 
         
 
