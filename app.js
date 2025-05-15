@@ -19,7 +19,8 @@ const {
   generateCode,
   formatString,
   reportError,
-  calculateTransfer
+  calculateTransfer,
+  removeCookie
 } = require("./functions.js");
 const express = require("express");
 const http = require("http");
@@ -31,7 +32,10 @@ const md5 = require("md5");
 const bodyParser = require("body-parser");
 const app = express();
 // const region = "us-east-1"
-const session = require("express-session");
+// const session = require("express-session");
+const cookieParser = require("cookie-parser")
+const jwt = require('jsonwebtoken');
+
 const {
   locateEntry,
   addEntry,
@@ -40,7 +44,7 @@ const {
   removeEntry,
   searchBySortKey
 } = require("./databaseFunctions.js");
-const MemoryStore = require("memorystore")(session);
+// const MemoryStore = require("memorystore")(session);
 const { CronJob } = require('cron');
 const bcrypt = require("bcrypt");
 
@@ -83,23 +87,39 @@ if (process.env.NODE_ENV === "DEV") {
 }
 
 // Setting up cookies
-app.use(
-  session({
-    secret: process.env.COOKIE_SECRET,
-    cookie: {
-      path: "/",
-      maxAge: 2628000000,
-      httpOnly: true,
-      sameSite: "lax",
-      // secure: true,
-    },
-    resave: false,
-    saveUninitialized: true,
-    store: new MemoryStore({
-      checkPeriod: 86400000,
-    }),
-  })
-);
+
+app.use(cookieParser(process.env.HTTP_COOKIE_SECRET))
+
+
+// app.use(function (req,res,next) {
+  
+//   const cookie = req.cookies['jwt'];
+
+//   if (cookie ===undefined) {
+
+
+//   }
+
+
+// })
+
+// app.use(
+//   session({
+//     secret: process.env.COOKIE_SECRET,
+//     cookie: {
+//       path: "/",
+//       maxAge: 2628000000,
+//       httpOnly: true,
+//       sameSite: "lax",
+//       // secure: true,
+//     },
+//     resave: false,
+//     saveUninitialized: true,
+//     store: new MemoryStore({
+//       checkPeriod: 86400000,
+//     }),
+//   })
+// );
 
 
 
@@ -510,7 +530,7 @@ app.post("/register", async (req, res) => {
                       ...newUser,
                     });
 
-                    setCookie(req, uuid);
+                    setCookie(req, res,uuid);
                     res.status(200).send(craftRequest(200, uuid));
                   }
                 });
@@ -560,7 +580,7 @@ app.post("/login", (req, res) => {
                   console.log("do passwords match", result);
 
                   if (result) {
-                    setCookie(req, user.uuid);
+                    setCookie(req,res, user.uuid);
                     if (isAdmin) {
                       res
                         .status(200)
@@ -595,7 +615,7 @@ app.post("/login", (req, res) => {
                     res.status(400).send(craftRequest(400));
                   } else {
                     if (result) {
-                      setCookie(req, query[0].uuid);
+                      setCookie(req,res, query[0].uuid);
                       res
                         .status(200)
                         .send(craftRequest(200, { url: "/scanUser" }));
@@ -991,7 +1011,7 @@ app.post("/createSchool", (req, res) => {
 
                                     prevSchools.push(uuid);
                                     updateEntry("uuid", "SCHOOLNAMES", { allOrganizations: prevSchools}, process.env.DYNAMO_SECONDARY, "schoolName", schoolParent.toLowerCase().trim()).then(() => {
-                                        setCookie(req, uuid);
+                                        setCookie(req,res, uuid);
                                         res.status(200).send(craftRequest(200));
             
                                     })
@@ -2383,7 +2403,10 @@ app.get("/signout", (req, res) => {
       if (id === "No user found") {
         res.status(400).send(craftRequest(400));
       } else {
-        req.session.user = null;
+        // bookmark
+        removeCookie(req,res);
+
+
         res.status(200).send(craftRequest(200));
       }
     });
@@ -2564,7 +2587,7 @@ app.post("/createSecurity", (req, res) => {
                   process.env.DYNAMO_FOURTH
                 ).then(() => {
                   // Potential Vulnerability here as we aren't even checking if the uuid is valid yet we are still trying to update it.
-                  req.session.user = uuid;
+                  setCookie(req,res,uuid);
                   res.status(200).send(craftRequest(200));
                 });
               } else {

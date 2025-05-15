@@ -1,30 +1,55 @@
 const nodemailer = require("nodemailer");
-
+require("dotenv").config();
+const jwt = require('jsonwebtoken');
+const fs = require("fs")
+const cookieParser = require("cookie-parser")
 function authenticateUser(req) {
-  return new Promise((resolve) => {
-    let sessionId = req.sessionID;
+  return new Promise(async(resolve) => {
 
-    if (!sessionId) {
-      resolve("No user found");
+    const jwtCookie = cookieParser.JSONCookies(req.cookies)?.jwt;
+    // console.log("All Cookies", jwtCookie)
+    
+
+    // console.log("All cookies", cookieParser.JSONCookies(req.cookies))
+    if (jwtCookie!==undefined&&jwtCookie!==null) {
+      try {
+        const payload = jwt.verify(jwtCookie, process.env.COOKIE_SECRET,)
+        console.log("here's the payload", payload)
+        resolve(payload.uuid);
+      } catch(e) {
+        console.log(e);
+        resolve("No user found");
+      }
+    
     } else {
-      req.sessionStore.get(sessionId, (err, session) => {
-        if (err) {
-          console.log(err);
-          resolve("No user found");
-        } else {
-          if (!session) {
-            resolve("No user found");
-          } else {
-            const currentUser = session.user;
-            if (!currentUser) {
-              resolve("No user found");
-            } else {
-              resolve(currentUser);
-            }
-          }
-        }
-      });
+      resolve("No user found")
     }
+
+
+
+    // let sessionId = req.sessionID;
+
+    // if (!sessionId) {
+    //   resolve("No user found");
+    // } else {
+    //   req.sessionStore.get(sessionId, (err, session) => {
+    //     if (err) {
+    //       console.log(err);
+    //       resolve("No user found");
+    //     } else {
+    //       if (!session) {
+    //         resolve("No user found");
+    //       } else {
+    //         const currentUser = session.user;
+    //         if (!currentUser) {
+    //           resolve("No user found");
+    //         } else {
+    //           resolve(currentUser);
+    //         }
+    //       }
+    //     }
+    //   });
+    // }
   });
 }
 
@@ -152,13 +177,29 @@ function craftRequest(code, body) {
   }
 }
 
-function setCookie(req, uuid) {
+function setCookie(req, res, uuid) {
+  return new Promise((resolve) => {
+    
   if (req && uuid) {
-    req.session.user = uuid;
-    return true;
+    // console.log(fs.readFileSync('jwtKey.txt'))
+    res.cookie("jwt", jwt.sign({uuid: uuid}, process.env.COOKIE_SECRET, {expiresIn: "1 day"}))
+
+
+    // req.session.user = uuid;
+    resolve(true);
   } else {
-    return false;
+    resolve(false);
   }
+
+
+
+  })
+}
+
+function removeCookie(req,res) {
+  res.clearCookie("jwt")
+
+
 }
 
 function formatString(string) {
@@ -187,5 +228,6 @@ module.exports = {
   setCookie,
   generateCode,
   formatString,
-  calculateTransfer
+  calculateTransfer,
+  removeCookie
 };
