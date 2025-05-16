@@ -198,7 +198,7 @@ function setCookie(req, res, uuid) {
 
 function removeCookie(req,res) {
   res.clearCookie("jwt")
-
+  return;
 
 }
 

@@ -268,7 +268,7 @@ app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
                     updateEntry(
                       "uuid",
                       metaData.schoolId,
-                      { events: updatedEvents, amountAvailable: Number(school.amountAvailable + calculateTransfer(totalAmountGenerated, JSON.parse(metaData.allBought).length)) + Number(totalAmountGenerated) },
+                      { events: updatedEvents, amountAvailable: Number(school.amountAvailable + calculateTransfer(totalAmountGenerated, JSON.parse(metaData.allBought).length)) },
                       process.env.DYNAMO_SECONDARY
                     ).then(async() => {
                       try {
@@ -1550,11 +1550,11 @@ app.post("/create-checkout-session", (req, res) => {
                         },
                         success_url:
                           process.env.NODE_ENV === "DEV"
-                            ? "http://localhost:3000/dashboard"
+                            ? "http://localhost:5173/dashboard"
                             : "https://ticketnest.us/dashboard",
                         cancel_url:
                           process.env.NODE_ENV === "DEV"
-                            ? "http://localhost:3000/dashboard"
+                            ? "http://localhost:5173/dashboard"
                             : "https://ticketnest.us/dashboard",
                       });
                       console.log("Session: ", session);
@@ -2464,7 +2464,7 @@ app.post("/sendSecurity", (req, res) => {
                 <div style="text-align:center; margin:30px 0;">
                   <a href="${
                     process.env.NODE_ENV==="DEV"
-                      ? "http://localhost:3000/createSecurity/" + user.uuid
+                      ? "http://localhost:5173/createSecurity/" + user.uuid
                       : "https://ticketnest.us/createSecurity/" + user.uuid
                   }" style="background-color:#4CAF50; color:#ffffff; padding:14px 24px; text-decoration:none; font-size:16px; border-radius:5px; display:inline-block;">
                     Finish Creating Account
@@ -2518,7 +2518,7 @@ app.post("/sendSecurity", (req, res) => {
                 <div style="text-align:center; margin:30px 0;">
                   <a href="${
                     process.env.NODE_ENV==="DEV"
-                      ? "http://localhost:3000/createSecurity/" + uuid
+                      ? "http://localhost:5173/createSecurity/" + uuid
                       : "https://ticketnest.us/createSecurity/" + uuid
                   }" style="background-color:#4CAF50; color:#ffffff; padding:14px 24px; text-decoration:none; font-size:16px; border-radius:5px; display:inline-block;">
                     Finish Creating Account
@@ -2809,6 +2809,9 @@ app.get("/getFinancialsGraph", (req,res) => {
 
 
 })
+
+
+
 
 
 
