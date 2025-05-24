@@ -115,7 +115,7 @@ function isPassword(password) {
   return passedTests;
 }
 
-function isString(s, lengthLimit = 1000000) {
+function isString(s, lengthLimit = 1000000, checkWhitespace=false, checkSymbols=false) {
   const string = String(s);
   // for (let i=0; i<string.length; i++) {
   //     if (!isNaN(string[i])) {
@@ -123,6 +123,21 @@ function isString(s, lengthLimit = 1000000) {
   //     }
 
   if (s !== undefined && s !== null && string.length < lengthLimit) {
+
+    if (checkWhitespace) {
+     
+      for (let i = 0; i < string.length; i++) {
+        if (string[i] === " ") {
+          return false;
+        }
+      }
+    }
+
+    if (checkSymbols&&s.match(/[|\\/~^:,;?!&%$@*+]/)) {
+      return false;
+    }
+
+
     return true;
   } else {
     return false;

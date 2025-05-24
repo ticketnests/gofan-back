@@ -34,7 +34,7 @@ const app = express();
 // const region = "us-east-1"
 // const session = require("express-session");
 const cookieParser = require("cookie-parser")
-const jwt = require('jsonwebtoken');
+// const jwt = require('jsonwebtoken');
 
 const {
   locateEntry,
@@ -71,11 +71,12 @@ const SCHEMA = ["name", "email", "password"];
 if (process.env.NODE_ENV === "DEV") {
   app.use(
     cors({
-      origin: "http://localhost:5173",
+      origin: ["http://localhost:3000", "http://localhost:5173"],
       methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
       credentials: true,
     })
   );
+
 } else {
   app.use(
         cors({
@@ -584,11 +585,20 @@ app.post("/login", (req, res) => {
                     if (isAdmin) {
                       res
                         .status(200)
-                        .send(craftRequest(200, { url: "/admindashboard" }));
+                        .send(craftRequest(200, { url: "/admindashboard", id: users[0].uuid, name: cmod.decrypt(users[0].name), hasVerified: (isAdmin ? users[0].hasVerified : undefined)  }));
                     } else {
-                      res
+                      console.log(users[0]);
+                      locateEntry("uuid", users[0].uuid).then((user) => {
+                        
+                        res
                         .status(200)
-                        .send(craftRequest(200, { url: "/dashboard" }));
+                        .send(craftRequest(200, { url: "/dashboard", id: user.uuid, name: cmod.decrypt(user.name) }));
+
+
+                      })
+
+
+               
                     }
                   } else {
                     res.status(400).send(craftRequest(400));
@@ -618,7 +628,8 @@ app.post("/login", (req, res) => {
                       setCookie(req,res, query[0].uuid);
                       res
                         .status(200)
-                        .send(craftRequest(200, { url: "/scanUser" }));
+                        .send(craftRequest(200, { url: "/scanUser", id: query[0].uuid, name: cmod.decrypt(query[0].name) }));
+                        // 
                     } else {
                       res.status(400).send(craftRequest(400));
                     }
@@ -937,18 +948,37 @@ app.post("/createSchool", (req, res) => {
 
   // email
   try {
-    const { email, name, schoolParent, schoolAddress, password, categoryId} = req.body;
+    const { email, name, schoolParent, schoolAddress, password, categoryId, isSchoolAccount} = req.body;
+    console.log(isEmail(email))
+    console.log( isString(name, 30) )
+    console.log(typeof isSchoolAccount === "boolean" )
+    console.log(schoolAddress.length < 1000)
+    console.log(isString(schoolParent, 100))
+    console.log(isPassword(password))
+    console.log(isString(categoryId, 100))
 
-    if (isEmail(email) && isString(name, 30) && schoolAddress.length < 1000 && isString(schoolParent, 100) && isPassword(password) && isString(categoryId, 100)) {
+    if (isEmail(email) && isString(name, 30, true) && typeof isSchoolAccount === "boolean" && schoolAddress.length < 1000 && isString(schoolParent, 100) && isPassword(password) && isString(categoryId, 100)) {
       locateEntry("emailHash", md5(email), process.env.DYNAMO_SECONDARY).then(
         ({ query }) => {
           const users = query;
+          console.log("users", users);
           if (users.length === 0) {
 
-            locateEntry("uuid", "SCHOOLNAMES", process.env.DYNAMO_SECONDARY, false, "schoolName", schoolParent.toLowerCase().trim()).then((school) => {
-                if (school !== null) {
 
-                    if (school.categoryId === categoryId) {
+
+            console.log("This happened")
+
+
+            locateEntry("uuid", isSchoolAccount ? "SCHOOLNAMES" : "PERSONALNAMES", process.env.DYNAMO_SECONDARY, false, "schoolName", isSchoolAccount ? schoolParent.toLowerCase().trim() : name.toLowerCase().trim()).then((school) => {
+              
+              console.log("school", school);
+              // &&isSchoolAccount
+              if (school !== null&&isSchoolAccount) {
+
+
+
+                  
+                      if (school.categoryId === categoryId) {
                         bcrypt.hash(password, saltRounds, async function (err, hash) {
                             if (err) {
                               console.log(err);
@@ -970,7 +1000,8 @@ app.post("/createSchool", (req, res) => {
                                     stripe_dashboard: {
                                       type: "express"
                                     }
-                                  }
+                                  },
+
                                 })
 
                                 await stripe.accounts.update(account.id, {
@@ -1017,7 +1048,7 @@ app.post("/createSchool", (req, res) => {
                                     })
               
                                     
-              
+                                    
               
               
                                   //   addEntry(
@@ -1049,11 +1080,96 @@ app.post("/createSchool", (req, res) => {
                     } else {
                         res.status(400).send(craftRequest(400, { status: "Invalid categoryId" }));
                     }
+
+
+                } else if (school===null&&!isSchoolAccount) {
+                  bcrypt.hash(password, saltRounds, async function (err, hash) {
+                    if (err) {
+                      console.log(err);
+                      res.status(400).send(craftRequest(400));
+                    } else {
+                      if (hash !== null) {
+                        const uuid = v4();
+
+                        const account = await stripe.accounts.create({
+                          country: "US",
+                          email: email.trim(),
+                          capabilities: {
+                            card_payments: {
+                              requested: true,
+                            },
+                            transfers: {
+                              requested: true,
+                            }
+                          },
+                          controller: {
+                            fees: {
+                              payer: "application"
+                            }, 
+                            losses: {
+                              payments: 'application'
+                            }, 
+                            stripe_dashboard: {
+                              type: "express"
+                            },
+                            
+                          },
+
+                        })
+
+                        await stripe.accounts.update(account.id, {
+
+                          tos_acceptance: {
+                            service_agreement: "full",
+
+                          }
+                        })
+
+
+                        console.log(account);
+
+
+
+
+                        const newSchool = {
+                          stripeId: account.id,
+                          hasVerified: false,
+                          uuid: uuid,
+                          schoolName: "x",
+                          password: hash,
+                          emailHash: md5(email),
+                          email: cmod.encrypt(email),
+                          schoolAddress: cmod.encrypt("N/A"),
+                          schoolParent: cmod.encrypt("N/A"),
+                          name: cmod.encrypt(name),
+                          amountAvailable: 0,
+                          // ticketsUsed: 0,
+                          lastWithdraw: null,
+                        };
+      
+                        addEntry(newSchool, process.env.DYNAMO_SECONDARY).then(
+                          (x) => {
+                            
+
                     
 
-
-
-
+                            addEntry({
+                              uuid: "PERSONALNAMES",
+                              schoolName: name.trim().toLowerCase(), 
+                              categoryId: uuid,
+                            }, process.env.DYNAMO_SECONDARY).then(() => {
+                              setCookie(req,res, uuid);
+                              res.status(200).send(craftRequest(200))
+                            })
+                          }
+                        );
+                      } else {
+                        res.status(400).send(craftRequest(400));
+                      }
+                    }
+      
+                    // Store hash in your password DB.
+                  });
                 } else {
                     res.status(400).send(craftRequest(400));
                 }
@@ -1105,6 +1221,7 @@ app.get("/createConnectLink", (req,res) => {
 
 
         } else {
+          console.log("the id failed and it was", id);
           res.status(400).send(craftRequest(400));  
         }
 
@@ -1238,7 +1355,7 @@ app.post("/getSchool", (req, res) => {
 
     if (isString(uuid, 100) && uuid != undefined) {
       locateEntry("uuid", uuid, process.env.DYNAMO_SECONDARY).then((school) => {
-        console.log("school", typeof school);
+        console.log("school", school);
         if (school !== null && school != undefined) {
           console.log(school);
           const schoolDetails = {
@@ -1272,10 +1389,12 @@ app.post("/getSchool", (req, res) => {
           }
 
           console.log({ ...schoolDetails, events: schoolList });
+
           res
             .status(200)
             .send(craftRequest(200, { ...schoolDetails, events: schoolList }));
         } else {
+          // console.log()
           res.status(404).send(craftRequest(404));
         }
       });
@@ -1345,7 +1464,7 @@ app.post("/createEvent", (req, res) => {
         ) {
           locateEntry("uuid", id, process.env.DYNAMO_SECONDARY).then(
             async (user) => {
-              if (user != null) {
+              if (user != null&&user.hasVerified) {
                 // Lets check if an option  is valid
                 // {
                 //         name: "Adult Pass",
@@ -2234,11 +2353,12 @@ app.get("/sitemap", async(req,res) => {
 
 app.post("/schoolSearch", (req, res) => {
   try {
-    const { query } = req.body;
-    if (typeof query === "string" && query.length >= 2) {
+    const { query, schoolOnly } = req.body;
+    if (typeof query === "string" && query.length >= 2 && typeof schoolOnly === "boolean") {
       searchEntry(
         "uuid",
-        "SCHOOLNAMES",
+        schoolOnly ? "SCHOOLNAMES" : "PERSONALNAMES"
+        ,
         "schoolName",
         query.toLowerCase(),
         process.env.DYNAMO_SECONDARY
@@ -2400,6 +2520,7 @@ app.post("/batchCreate", (req, res) => {
 app.get("/signout", (req, res) => {
   try {
     authenticateUser(req).then((id) => {
+      console.log("No user found");
       if (id === "No user found") {
         res.status(400).send(craftRequest(400));
       } else {

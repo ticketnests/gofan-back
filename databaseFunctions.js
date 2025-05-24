@@ -206,7 +206,7 @@ async function locateEntry(keyName, value, tableName=process.env.DYNAMO_NAME, ov
 
 // This would only happen for begins with kind of things
 async function searchEntry(keyName, keyValue, sortName, sortValue, tableName) {
-    return new Promise(async (resolve, reject) => {
+    return new Promise(async (resolve) => {
       try {
         const response = await documentClient.send(
             new QueryCommand({
