@@ -80,7 +80,7 @@ if (process.env.NODE_ENV === "DEV") {
 } else {
   app.use(
         cors({
-          origin: process.env.PROD_URL,
+          origin: [process.env.PROD_URL],
           methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
           credentials: true,
         })
@@ -190,7 +190,13 @@ app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
 
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
-
+    console.log("all headers", req.headers)
+    // const getFullEvent = async() => {
+    //   const x = await stripe.events.retrieve(event.id)
+    //   console.log("full event", x);
+    // }
+    // getFullEvent();
+    console.log("Connected Account Id:",  req.headers['stripe-account'])
     switch (event.type) {
 
 
@@ -1105,14 +1111,13 @@ app.post("/createSchool", (req, res) => {
                           controller: {
                             fees: {
                               payer: "application"
-                            }, 
+                            },
                             losses: {
                               payments: 'application'
-                            }, 
+                            },
                             stripe_dashboard: {
                               type: "express"
                             },
-                            
                           },
 
                         })
